@@ -72,6 +72,20 @@ pacman -S mingw-w64-ucrt-x86_64-qt6-base-static mingw-w64-ucrt-x86_64-qt6-svg-st
 build.bat release static run
 ```
 
+### Creating an Installer
+
+Uses the [Qt Installer Framework](https://doc.qt.io/qtinstallerframework/) to produce a setup wizard with Start Menu/Desktop shortcuts and an uninstaller.
+
+```bash
+# Install Qt IFW (one-time)
+pacman -S mingw-w64-ucrt-x86_64-qt-installer-framework
+
+# Build + create installer
+build.bat release static install
+```
+
+Output: `EleSim-0.1.0-Setup.exe`
+
 ## Project Structure
 
 ```
@@ -94,8 +108,6 @@ EleSim/
 |---------|---------|---------|
 | [Qt 6](https://www.qt.io/) | 6.10 | GUI framework, graphics scene, SVG rendering |
 | [Eigen](https://eigen.tuxfamily.org/) | 5.x | Linear algebra for the MNA solver |
-
-See [DEPENDENCIES.md](DEPENDENCIES.md) for the full breakdown including transitive runtime dependencies.
 
 ## Tests
 
