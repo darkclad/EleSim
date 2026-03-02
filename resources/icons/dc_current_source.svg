@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Circle -->
+  <circle cx="24" cy="24" r="14" fill="none" stroke="#333" stroke-width="2.5"/>
+  <!-- Lead lines -->
+  <line x1="24" y1="2" x2="24" y2="10" stroke="#333" stroke-width="2.5"/>
+  <line x1="24" y1="38" x2="24" y2="46" stroke="#333" stroke-width="2.5"/>
+  <!-- Arrow pointing up (current direction) -->
+  <line x1="24" y1="32" x2="24" y2="16" stroke="#333" stroke-width="2.5"/>
+  <polyline points="20,20 24,16 28,20" fill="none" stroke="#333" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>

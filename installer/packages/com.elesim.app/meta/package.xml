@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Package>
+    <DisplayName>EleSim</DisplayName>
+    <Description>Electronic circuit simulator with schematic editor and MNA solver</Description>
+    <Version>0.1.0</Version>
+    <ReleaseDate>2026-03-01</ReleaseDate>
+    <Default>true</Default>
+    <Script>installscript.qs</Script>
+</Package>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Lead lines -->
+  <line x1="4" y1="24" x2="16" y2="24" stroke="#333" stroke-width="2.5"/>
+  <line x1="32" y1="24" x2="44" y2="24" stroke="#333" stroke-width="2.5"/>
+  <!-- Contact dots -->
+  <circle cx="16" cy="24" r="3" fill="#333"/>
+  <circle cx="32" cy="24" r="3" fill="#333"/>
+  <!-- Switch arm (open) -->
+  <line x1="16" y1="24" x2="30" y2="14" stroke="#C00" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

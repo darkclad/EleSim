@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Lead lines -->
+  <line x1="4" y1="24" x2="16" y2="24" stroke="#333" stroke-width="2.5"/>
+  <line x1="32" y1="24" x2="44" y2="24" stroke="#333" stroke-width="2.5"/>
+  <!-- Triangle -->
+  <polygon points="16,12 32,24 16,36" fill="#333" stroke="#333" stroke-width="1.5"/>
+  <!-- Cathode bar -->
+  <line x1="32" y1="12" x2="32" y2="36" stroke="#333" stroke-width="3"/>
+</svg>

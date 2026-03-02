@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Lead lines -->
+  <line x1="4" y1="24" x2="10" y2="24" stroke="#333" stroke-width="2.5"/>
+  <line x1="38" y1="24" x2="44" y2="24" stroke="#333" stroke-width="2.5"/>
+  <!-- Coil humps -->
+  <path d="M10,24 A4,6 0 0,1 17,24 A4,6 0 0,1 24,24 A4,6 0 0,1 31,24 A4,6 0 0,1 38,24" fill="none" stroke="#333" stroke-width="2.5"/>
+</svg>

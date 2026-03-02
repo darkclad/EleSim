@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Lead lines -->
+  <line x1="4" y1="24" x2="10" y2="24" stroke="#333" stroke-width="2.5"/>
+  <line x1="38" y1="24" x2="44" y2="24" stroke="#333" stroke-width="2.5"/>
+  <!-- Zigzag -->
+  <polyline points="10,24 13,14 19,34 25,14 31,34 35,24 38,24" fill="none" stroke="#333" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>

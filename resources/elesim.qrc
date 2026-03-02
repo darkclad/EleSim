@@ -1,0 +1,19 @@
+<RCC>
+    <qresource prefix="/">
+        <file>icons/dc_source.svg</file>
+        <file>icons/ac_source.svg</file>
+        <file>icons/resistor.svg</file>
+        <file>icons/capacitor.svg</file>
+        <file>icons/lamp.svg</file>
+        <file>icons/switch2.svg</file>
+        <file>icons/switch3.svg</file>
+        <file>icons/switch4.svg</file>
+        <file>icons/inductor.svg</file>
+        <file>icons/diode.svg</file>
+        <file>icons/zener_diode.svg</file>
+        <file>icons/ground.svg</file>
+        <file>icons/dc_current_source.svg</file>
+        <file>icons/pulse_source.svg</file>
+        <file>icons/elesim_icon.svg</file>
+    </qresource>
+</RCC>

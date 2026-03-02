@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0A1628"/>
+      <stop offset="100%" stop-color="#0D2A4A"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00C9FF"/>
+      <stop offset="50%" stop-color="#00E5FF"/>
+      <stop offset="100%" stop-color="#00FFB2"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Background rounded rect -->
+  <rect x="8" y="8" width="240" height="240" rx="48" ry="48" fill="url(#bg)"
+        stroke="rgba(0,200,255,0.15)" stroke-width="2"/>
+  <!-- Subtle grid -->
+  <g opacity="0.06" stroke="#00C8FF" stroke-width="0.5">
+    <line x1="48" y1="8" x2="48" y2="248"/><line x1="88" y1="8" x2="88" y2="248"/>
+    <line x1="128" y1="8" x2="128" y2="248"/><line x1="168" y1="8" x2="168" y2="248"/>
+    <line x1="208" y1="8" x2="208" y2="248"/>
+    <line x1="8" y1="48" x2="248" y2="48"/><line x1="8" y1="88" x2="248" y2="88"/>
+    <line x1="8" y1="128" x2="248" y2="128"/><line x1="8" y1="168" x2="248" y2="168"/>
+    <line x1="8" y1="208" x2="248" y2="208"/>
+  </g>
+  <!-- Waveform -->
+  <path d="M 40 128 C 55 128 65 128 75 128 L 82 128 C 90 128 95 105 105 90
+           C 112 78 117 78 120 100 C 123 115 126 128 132 128
+           C 138 128 138 128 143 128 C 148 128 153 145 160 162
+           C 165 172 169 168 174 155 C 178 145 180 128 186 128 L 216 128"
+        stroke="url(#wave)" stroke-width="6" fill="none" stroke-linecap="round"
+        filter="url(#glow)"/>
+  <!-- Peak dot -->
+  <circle cx="120" cy="100" r="5" fill="#00FFE5" filter="url(#glow)"/>
+</svg>

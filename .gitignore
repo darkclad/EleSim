@@ -1,0 +1,23 @@
+# Build
+build-*/
+
+# Installer
+*-Setup.exe
+installer/packages/com.elesim.app/data/
+
+# Claude
+.claude/
+
+# IDE
+.vscode/
+.idea/
+*.user
+CMakeUserPresets.json
+
+# Test output
+result.txt
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
