@@ -73,6 +73,11 @@ set(RESOURCES
     ${CMAKE_SOURCE_DIR}/resources/elesim.qrc
 )
 
-qt_add_executable(EleSim ${SOURCES} ${RESOURCES})
+# Windows application icon (shown in Explorer, taskbar)
+if(WIN32)
+    set(WIN_RC ${CMAKE_SOURCE_DIR}/resources/elesim.rc)
+endif()
+
+qt_add_executable(EleSim ${SOURCES} ${RESOURCES} ${WIN_RC})
 target_link_libraries(EleSim PRIVATE Qt6::Widgets Qt6::SvgWidgets Qt6::Concurrent Eigen3::Eigen)
 target_include_directories(EleSim PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
