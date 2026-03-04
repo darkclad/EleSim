@@ -367,7 +367,7 @@ void MainWindow::createActions()
     m_aboutAction->setStatusTip(tr("About this application"));
     connect(m_aboutAction, &QAction::triggered, this, [this]() {
         QMessageBox::about(this, tr("About EleSim"),
-            tr("<h2>EleSim v0.1.0</h2>"
+            tr("<h2>EleSim v1.0.0</h2>"
                "<p>Electrical Circuit Simulator</p>"
                "<p>Design circuits and simulate DC/AC analysis "
                "with real-time measurements.</p>"));

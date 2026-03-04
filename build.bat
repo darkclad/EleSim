@@ -96,7 +96,7 @@ if !DO_INSTALLER!==1 (
     )
 
     :: Build installer
-    set INSTALLER_NAME=EleSim-0.1.0-Setup
+    set INSTALLER_NAME=EleSim-1.0.0-Setup
     binarycreator -c installer\config\config.xml -p installer\packages !INSTALLER_NAME!.exe
     if errorlevel 1 (
         echo Installer creation failed.

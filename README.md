@@ -95,7 +95,7 @@ pacman -S mingw-w64-ucrt-x86_64-qt-installer-framework
 build.bat release static install
 ```
 
-Output: `EleSim-0.1.0-Setup.exe`
+Output: `EleSim-1.0.0-Setup.exe`
 
 ## Project Structure
 
