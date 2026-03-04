@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <g fill="none" stroke="#222" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Input leads -->
+    <line x1="4" y1="22" x2="16" y2="22"/>
+    <line x1="4" y1="42" x2="16" y2="42"/>
+    <!-- AND body: flat left + arc right -->
+    <path d="M16,14 L30,14 A18,18 0 0,1 30,50 L16,50 Z"/>
+    <!-- Output lead -->
+    <line x1="48" y1="32" x2="60" y2="32"/>
+  </g>
+</svg>

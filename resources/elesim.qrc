@@ -14,6 +14,12 @@
         <file>icons/ground.svg</file>
         <file>icons/dc_current_source.svg</file>
         <file>icons/pulse_source.svg</file>
+        <file>icons/nmosfet.svg</file>
+        <file>icons/pmosfet.svg</file>
+        <file>icons/not_gate.svg</file>
+        <file>icons/and_gate.svg</file>
+        <file>icons/or_gate.svg</file>
+        <file>icons/xor_gate.svg</file>
         <file>icons/elesim_icon.svg</file>
     </qresource>
 </RCC>

@@ -7,6 +7,12 @@
 #include "../core/components/DCCurrentSource.h"
 #include "../core/components/Diode.h"
 #include "../core/components/ZenerDiode.h"
+#include "../core/components/NMosfet.h"
+#include "../core/components/PMosfet.h"
+#include "../core/components/NOTGate.h"
+#include "../core/components/ANDGate.h"
+#include "../core/components/ORGate.h"
+#include "../core/components/XORGate.h"
 #include "../core/components/Switch3Way.h"
 #include "../core/components/Switch4Way.h"
 
@@ -34,6 +40,39 @@ static bool canStamp(const Component* comp)
     return true;
 }
 
+// Helper: check if a component is a logic gate
+static bool isLogicGate(ComponentType t)
+{
+    return t == ComponentType::NOTGate || t == ComponentType::ANDGate ||
+           t == ComponentType::ORGate  || t == ComponentType::XORGate;
+}
+
+// Helper: evaluate logic gate truth table from input voltages
+// Returns true if output should be HIGH
+static bool evaluateGate(const Component* comp, double vA, double vGND)
+{
+    double vth = comp->value();
+    bool aHigh = (vA - vGND) >= vth;
+
+    if (comp->type() == ComponentType::NOTGate) {
+        return !aHigh;
+    }
+    // 2-input gates: caller must pass vB via the vGND trick — use separate overload
+    return false; // should not reach here for 2-input gates
+}
+
+static bool evaluateGate2(const Component* comp, double vA, double vB, double vGND)
+{
+    double vth = comp->value();
+    bool aHigh = (vA - vGND) >= vth;
+    bool bHigh = (vB - vGND) >= vth;
+
+    if (comp->type() == ComponentType::ANDGate)  return aHigh && bHigh;
+    if (comp->type() == ComponentType::ORGate)   return aHigh || bHigh;
+    if (comp->type() == ComponentType::XORGate)  return aHigh != bHigh;
+    return false;
+}
+
 // Helper: get the two active pin indices for current calculation
 static void getActivePins(const Component* comp, int& pin1, int& pin2)
 {
@@ -46,6 +85,10 @@ static void getActivePins(const Component* comp, int& pin1, int& pin2)
         auto* sw = static_cast<const Switch4Way*>(comp);
         // Report current for first pair
         pin2 = sw->isCrossed() ? 3 : 2;
+    } else if (comp->type() == ComponentType::NOTGate) {
+        pin1 = 2; pin2 = 3; // VDD, GND (supply current)
+    } else if (isLogicGate(comp->type())) {
+        pin1 = 3; pin2 = 4; // VDD, GND for 2-input gates
     }
 }
 
@@ -115,6 +158,21 @@ SimulationResult MNASolver::solveDC(Circuit& circuit)
             zenerState[id] = ZenerDiode::Forward; // initial guess
     }
 
+    // Collect MOSFETs for iterative state resolution
+    std::map<int, bool> mosfetOn; // componentId -> on?
+    for (auto& [id, comp] : circuit.components()) {
+        if (comp->type() == ComponentType::NMosfet ||
+            comp->type() == ComponentType::PMosfet)
+            mosfetOn[id] = true; // initial guess: on
+    }
+
+    // Collect logic gates for iterative state resolution
+    std::map<int, bool> gateOutputHigh; // componentId -> output high?
+    for (auto& [id, comp] : circuit.components()) {
+        if (isLogicGate(comp->type()))
+            gateOutputHigh[id] = true; // initial guess: output high
+    }
+
     Eigen::VectorXd x;
 
     // Iterative DC solve: resolve diode states until stable
@@ -130,6 +188,24 @@ SimulationResult MNASolver::solveDC(Circuit& circuit)
             } else if (comp->type() == ComponentType::ZenerDiode) {
                 auto* zd = static_cast<ZenerDiode*>(comp.get());
                 zd->stampWithState(A, b, zenerState[id]);
+            } else if (comp->type() == ComponentType::NMosfet) {
+                auto* m = static_cast<NMosfet*>(comp.get());
+                m->stampWithState(A, b, mosfetOn[id] ? NMosfet::On : NMosfet::Cutoff);
+            } else if (comp->type() == ComponentType::PMosfet) {
+                auto* m = static_cast<PMosfet*>(comp.get());
+                m->stampWithState(A, b, mosfetOn[id] ? PMosfet::On : PMosfet::Cutoff);
+            } else if (comp->type() == ComponentType::NOTGate) {
+                auto* g = static_cast<NOTGate*>(comp.get());
+                g->stampWithState(A, b, gateOutputHigh[id] ? NOTGate::OutputHigh : NOTGate::OutputLow);
+            } else if (comp->type() == ComponentType::ANDGate) {
+                auto* g = static_cast<ANDGate*>(comp.get());
+                g->stampWithState(A, b, gateOutputHigh[id] ? ANDGate::OutputHigh : ANDGate::OutputLow);
+            } else if (comp->type() == ComponentType::ORGate) {
+                auto* g = static_cast<ORGate*>(comp.get());
+                g->stampWithState(A, b, gateOutputHigh[id] ? ORGate::OutputHigh : ORGate::OutputLow);
+            } else if (comp->type() == ComponentType::XORGate) {
+                auto* g = static_cast<XORGate*>(comp.get());
+                g->stampWithState(A, b, gateOutputHigh[id] ? XORGate::OutputHigh : XORGate::OutputLow);
             } else {
                 comp->stampDC(A, b, matSize);
             }
@@ -177,6 +253,54 @@ SimulationResult MNASolver::solveDC(Circuit& circuit)
                     newState = ZenerDiode::Blocking;
                 if (newState != zenerState[id]) {
                     zenerState[id] = newState;
+                    statesChanged = true;
+                }
+            } else if (comp->type() == ComponentType::NMosfet) {
+                // NMOS: Pin 0=Gate, Pin 1=Drain, Pin 2=Source
+                int nG = comp->pin(0).nodeId;
+                int nS = comp->pin(2).nodeId;
+                double vG = (nG > 0 && nG <= numNodes) ? x(nG - 1) : 0.0;
+                double vS = (nS > 0 && nS <= numNodes) ? x(nS - 1) : 0.0;
+                double vgs = vG - vS;
+                bool shouldBeOn = (vgs >= comp->value()); // Vth
+                if (shouldBeOn != mosfetOn[id]) {
+                    mosfetOn[id] = shouldBeOn;
+                    statesChanged = true;
+                }
+            } else if (comp->type() == ComponentType::PMosfet) {
+                // PMOS: Pin 0=Gate, Pin 1=Source, Pin 2=Drain
+                int nG = comp->pin(0).nodeId;
+                int nS = comp->pin(1).nodeId;
+                double vG = (nG > 0 && nG <= numNodes) ? x(nG - 1) : 0.0;
+                double vS = (nS > 0 && nS <= numNodes) ? x(nS - 1) : 0.0;
+                double vsg = vS - vG;
+                bool shouldBeOn = (vsg >= comp->value()); // Vth
+                if (shouldBeOn != mosfetOn[id]) {
+                    mosfetOn[id] = shouldBeOn;
+                    statesChanged = true;
+                }
+            } else if (comp->type() == ComponentType::NOTGate) {
+                int nA   = comp->pin(0).nodeId;
+                int nGND = comp->pin(3).nodeId;
+                double vA   = (nA > 0 && nA <= numNodes) ? x(nA - 1) : 0.0;
+                double vGND = (nGND > 0 && nGND <= numNodes) ? x(nGND - 1) : 0.0;
+                bool newOut = evaluateGate(comp.get(), vA, vGND);
+                if (newOut != gateOutputHigh[id]) {
+                    gateOutputHigh[id] = newOut;
+                    statesChanged = true;
+                }
+            } else if (comp->type() == ComponentType::ANDGate ||
+                       comp->type() == ComponentType::ORGate ||
+                       comp->type() == ComponentType::XORGate) {
+                int nA   = comp->pin(0).nodeId;
+                int nB   = comp->pin(1).nodeId;
+                int nGND = comp->pin(4).nodeId;
+                double vA   = (nA > 0 && nA <= numNodes) ? x(nA - 1) : 0.0;
+                double vB   = (nB > 0 && nB <= numNodes) ? x(nB - 1) : 0.0;
+                double vGND = (nGND > 0 && nGND <= numNodes) ? x(nGND - 1) : 0.0;
+                bool newOut = evaluateGate2(comp.get(), vA, vB, vGND);
+                if (newOut != gateOutputHigh[id]) {
+                    gateOutputHigh[id] = newOut;
                     statesChanged = true;
                 }
             }
@@ -244,6 +368,36 @@ SimulationResult MNASolver::solveDC(Circuit& circuit)
             } else {
                 br.current = vd / ZenerDiode::R_off;
             }
+        } else if (comp->type() == ComponentType::NMosfet) {
+            // NMOS: current through D(pin1)-S(pin2) channel
+            int nD = comp->pin(1).nodeId;
+            int nS = comp->pin(2).nodeId;
+            double vD = (nD >= 0 && result.nodeResults.count(nD)) ? result.nodeResults[nD].voltage : 0.0;
+            double vS = (nS >= 0 && result.nodeResults.count(nS)) ? result.nodeResults[nS].voltage : 0.0;
+            double vds = vD - vS;
+            br.voltageDrop = vds;
+            double R = mosfetOn[id] ? NMosfet::R_on : NMosfet::R_off;
+            br.current = vds / R;
+        } else if (comp->type() == ComponentType::PMosfet) {
+            // PMOS: current through S(pin1)-D(pin2) channel
+            int nS = comp->pin(1).nodeId;
+            int nD = comp->pin(2).nodeId;
+            double vS = (nS >= 0 && result.nodeResults.count(nS)) ? result.nodeResults[nS].voltage : 0.0;
+            double vD = (nD >= 0 && result.nodeResults.count(nD)) ? result.nodeResults[nD].voltage : 0.0;
+            double vsd = vS - vD;
+            br.voltageDrop = vsd;
+            double R = mosfetOn[id] ? PMosfet::R_on : PMosfet::R_off;
+            br.current = vsd / R;
+        } else if (isLogicGate(comp->type())) {
+            int vddPin = (comp->type() == ComponentType::NOTGate) ? 2 : 3;
+            int gndPin = (comp->type() == ComponentType::NOTGate) ? 3 : 4;
+            int nVDD = comp->pin(vddPin).nodeId;
+            int nGND = comp->pin(gndPin).nodeId;
+            double vVDD = (nVDD >= 0 && result.nodeResults.count(nVDD)) ? result.nodeResults[nVDD].voltage : 0.0;
+            double vGND_v = (nGND >= 0 && result.nodeResults.count(nGND)) ? result.nodeResults[nGND].voltage : 0.0;
+            br.voltageDrop = vVDD - vGND_v;
+            double R_total = NOTGate::R_on + NOTGate::R_off;
+            br.current = (vVDD - vGND_v) / R_total;
         } else if (comp->type() == ComponentType::DCCurrentSource) {
             br.current = comp->value();
         } else if (comp->value() > 0.0) {
@@ -335,6 +489,12 @@ SimulationResult MNASolver::solveAC(Circuit& circuit, double frequency)
                 br.current = std::abs(vDrop) / Diode::R_on;
             } else if (comp->type() == ComponentType::ZenerDiode) {
                 br.current = std::abs(vDrop) / ZenerDiode::R_on;
+            } else if (comp->type() == ComponentType::NMosfet ||
+                       comp->type() == ComponentType::PMosfet) {
+                // AC small-signal: use on-resistance
+                br.current = std::abs(vDrop) / NMosfet::R_on;
+            } else if (isLogicGate(comp->type())) {
+                br.current = std::abs(vDrop) / (NOTGate::R_on + NOTGate::R_off);
             } else {
                 br.current = std::abs(vDrop) / comp->value();
             }
@@ -507,6 +667,66 @@ SimulationResult MNASolver::solveTransient(Circuit& circuit, double timeStep, do
                     state = ZenerDiode::Blocking;
                 zd->stampWithState(A, b, state);
 
+            } else if (comp->type() == ComponentType::NMosfet) {
+                auto* m = static_cast<NMosfet*>(comp.get());
+                int nG = comp->pin(0).nodeId - 1;
+                int nS = comp->pin(2).nodeId - 1;
+                double vG = (nG >= 0) ? xPrev(nG) : 0.0;
+                double vS = (nS >= 0) ? xPrev(nS) : 0.0;
+                bool on = (vG - vS) >= comp->value();
+                m->stampWithState(A, b, on ? NMosfet::On : NMosfet::Cutoff);
+
+            } else if (comp->type() == ComponentType::PMosfet) {
+                auto* m = static_cast<PMosfet*>(comp.get());
+                int nG = comp->pin(0).nodeId - 1;
+                int nS = comp->pin(1).nodeId - 1;
+                double vG = (nG >= 0) ? xPrev(nG) : 0.0;
+                double vS = (nS >= 0) ? xPrev(nS) : 0.0;
+                bool on = (vS - vG) >= comp->value();
+                m->stampWithState(A, b, on ? PMosfet::On : PMosfet::Cutoff);
+
+            } else if (comp->type() == ComponentType::NOTGate) {
+                auto* g = static_cast<NOTGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nGND = comp->pin(3).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate(comp.get(), vA, vGND);
+                g->stampWithState(A, b, outHigh ? NOTGate::OutputHigh : NOTGate::OutputLow);
+
+            } else if (comp->type() == ComponentType::ANDGate) {
+                auto* g = static_cast<ANDGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nB   = comp->pin(1).nodeId - 1;
+                int nGND = comp->pin(4).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vB   = (nB >= 0) ? xPrev(nB) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate2(comp.get(), vA, vB, vGND);
+                g->stampWithState(A, b, outHigh ? ANDGate::OutputHigh : ANDGate::OutputLow);
+
+            } else if (comp->type() == ComponentType::ORGate) {
+                auto* g = static_cast<ORGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nB   = comp->pin(1).nodeId - 1;
+                int nGND = comp->pin(4).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vB   = (nB >= 0) ? xPrev(nB) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate2(comp.get(), vA, vB, vGND);
+                g->stampWithState(A, b, outHigh ? ORGate::OutputHigh : ORGate::OutputLow);
+
+            } else if (comp->type() == ComponentType::XORGate) {
+                auto* g = static_cast<XORGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nB   = comp->pin(1).nodeId - 1;
+                int nGND = comp->pin(4).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vB   = (nB >= 0) ? xPrev(nB) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate2(comp.get(), vA, vB, vGND);
+                g->stampWithState(A, b, outHigh ? XORGate::OutputHigh : XORGate::OutputLow);
+
             } else {
                 // DC stamp for resistors, DC sources, lamps
                 comp->stampDC(A, b, matSize);
@@ -608,6 +828,37 @@ SimulationResult MNASolver::solveTransient(Circuit& circuit, double timeStep, do
                 br.current = (vd + zd->zenerVoltage()) / ZenerDiode::R_on;
             else
                 br.current = vd / ZenerDiode::R_off;
+        } else if (comp->type() == ComponentType::NMosfet) {
+            int nG = comp->pin(0).nodeId;
+            int nS = comp->pin(2).nodeId;
+            int nD = comp->pin(1).nodeId;
+            double vG = (nG >= 0 && result.nodeResults.count(nG)) ? result.nodeResults[nG].voltage : 0.0;
+            double vS = (nS >= 0 && result.nodeResults.count(nS)) ? result.nodeResults[nS].voltage : 0.0;
+            double vD = (nD >= 0 && result.nodeResults.count(nD)) ? result.nodeResults[nD].voltage : 0.0;
+            double vds = vD - vS;
+            br.voltageDrop = vds;
+            double R = ((vG - vS) >= comp->value()) ? NMosfet::R_on : NMosfet::R_off;
+            br.current = vds / R;
+        } else if (comp->type() == ComponentType::PMosfet) {
+            int nG = comp->pin(0).nodeId;
+            int nS = comp->pin(1).nodeId;
+            int nD = comp->pin(2).nodeId;
+            double vG = (nG >= 0 && result.nodeResults.count(nG)) ? result.nodeResults[nG].voltage : 0.0;
+            double vS = (nS >= 0 && result.nodeResults.count(nS)) ? result.nodeResults[nS].voltage : 0.0;
+            double vD = (nD >= 0 && result.nodeResults.count(nD)) ? result.nodeResults[nD].voltage : 0.0;
+            double vsd = vS - vD;
+            br.voltageDrop = vsd;
+            double R = ((vS - vG) >= comp->value()) ? PMosfet::R_on : PMosfet::R_off;
+            br.current = vsd / R;
+        } else if (isLogicGate(comp->type())) {
+            int vddPin = (comp->type() == ComponentType::NOTGate) ? 2 : 3;
+            int gndPin = (comp->type() == ComponentType::NOTGate) ? 3 : 4;
+            int nVDD = comp->pin(vddPin).nodeId;
+            int nGND = comp->pin(gndPin).nodeId;
+            double vVDD = (nVDD >= 0 && result.nodeResults.count(nVDD)) ? result.nodeResults[nVDD].voltage : 0.0;
+            double vGND_v = (nGND >= 0 && result.nodeResults.count(nGND)) ? result.nodeResults[nGND].voltage : 0.0;
+            br.voltageDrop = vVDD - vGND_v;
+            br.current = (vVDD - vGND_v) / (NOTGate::R_on + NOTGate::R_off);
         } else if (comp->type() == ComponentType::DCCurrentSource) {
             br.current = comp->value();
         } else if (comp->value() > 0.0) {
@@ -750,6 +1001,66 @@ TransientResult MNASolver::solveTransientFull(Circuit& circuit, double timeStep,
                     state = ZenerDiode::Blocking;
                 zd->stampWithState(A, bVec, state);
 
+            } else if (comp->type() == ComponentType::NMosfet) {
+                auto* m = static_cast<NMosfet*>(comp.get());
+                int nG = comp->pin(0).nodeId - 1;
+                int nS = comp->pin(2).nodeId - 1;
+                double vG = (nG >= 0) ? xPrev(nG) : 0.0;
+                double vS = (nS >= 0) ? xPrev(nS) : 0.0;
+                bool on = (vG - vS) >= comp->value();
+                m->stampWithState(A, bVec, on ? NMosfet::On : NMosfet::Cutoff);
+
+            } else if (comp->type() == ComponentType::PMosfet) {
+                auto* m = static_cast<PMosfet*>(comp.get());
+                int nG = comp->pin(0).nodeId - 1;
+                int nS = comp->pin(1).nodeId - 1;
+                double vG = (nG >= 0) ? xPrev(nG) : 0.0;
+                double vS = (nS >= 0) ? xPrev(nS) : 0.0;
+                bool on = (vS - vG) >= comp->value();
+                m->stampWithState(A, bVec, on ? PMosfet::On : PMosfet::Cutoff);
+
+            } else if (comp->type() == ComponentType::NOTGate) {
+                auto* g = static_cast<NOTGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nGND = comp->pin(3).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate(comp.get(), vA, vGND);
+                g->stampWithState(A, bVec, outHigh ? NOTGate::OutputHigh : NOTGate::OutputLow);
+
+            } else if (comp->type() == ComponentType::ANDGate) {
+                auto* g = static_cast<ANDGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nB   = comp->pin(1).nodeId - 1;
+                int nGND = comp->pin(4).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vB   = (nB >= 0) ? xPrev(nB) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate2(comp.get(), vA, vB, vGND);
+                g->stampWithState(A, bVec, outHigh ? ANDGate::OutputHigh : ANDGate::OutputLow);
+
+            } else if (comp->type() == ComponentType::ORGate) {
+                auto* g = static_cast<ORGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nB   = comp->pin(1).nodeId - 1;
+                int nGND = comp->pin(4).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vB   = (nB >= 0) ? xPrev(nB) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate2(comp.get(), vA, vB, vGND);
+                g->stampWithState(A, bVec, outHigh ? ORGate::OutputHigh : ORGate::OutputLow);
+
+            } else if (comp->type() == ComponentType::XORGate) {
+                auto* g = static_cast<XORGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nB   = comp->pin(1).nodeId - 1;
+                int nGND = comp->pin(4).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vB   = (nB >= 0) ? xPrev(nB) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate2(comp.get(), vA, vB, vGND);
+                g->stampWithState(A, bVec, outHigh ? XORGate::OutputHigh : XORGate::OutputLow);
+
             } else {
                 comp->stampDC(A, bVec, matSize);
             }
@@ -832,6 +1143,39 @@ TransientResult MNASolver::solveTransientFull(Circuit& circuit, double timeStep,
                     current = (vDrop + zd->zenerVoltage()) / ZenerDiode::R_on;
                 else
                     current = vDrop / ZenerDiode::R_off;
+            } else if (comp->type() == ComponentType::NMosfet) {
+                // NMOS: Pin 0=Gate, Pin 1=Drain, Pin 2=Source
+                int nG2 = comp->pin(0).nodeId;
+                int nS2 = comp->pin(2).nodeId;
+                int nD2 = comp->pin(1).nodeId;
+                double vG2 = (nG2 > 0 && nG2 <= numNodes) ? x(nG2 - 1) : 0.0;
+                double vS2 = (nS2 > 0 && nS2 <= numNodes) ? x(nS2 - 1) : 0.0;
+                double vD2 = (nD2 > 0 && nD2 <= numNodes) ? x(nD2 - 1) : 0.0;
+                double vds2 = vD2 - vS2;
+                vDrop = vds2;
+                double R = ((vG2 - vS2) >= comp->value()) ? NMosfet::R_on : NMosfet::R_off;
+                current = vds2 / R;
+            } else if (comp->type() == ComponentType::PMosfet) {
+                // PMOS: Pin 0=Gate, Pin 1=Source, Pin 2=Drain
+                int nG2 = comp->pin(0).nodeId;
+                int nS2 = comp->pin(1).nodeId;
+                int nD2 = comp->pin(2).nodeId;
+                double vG2 = (nG2 > 0 && nG2 <= numNodes) ? x(nG2 - 1) : 0.0;
+                double vS2 = (nS2 > 0 && nS2 <= numNodes) ? x(nS2 - 1) : 0.0;
+                double vD2 = (nD2 > 0 && nD2 <= numNodes) ? x(nD2 - 1) : 0.0;
+                double vsd2 = vS2 - vD2;
+                vDrop = vsd2;
+                double R = ((vS2 - vG2) >= comp->value()) ? PMosfet::R_on : PMosfet::R_off;
+                current = vsd2 / R;
+            } else if (isLogicGate(comp->type())) {
+                int vddPin = (comp->type() == ComponentType::NOTGate) ? 2 : 3;
+                int gndPin = (comp->type() == ComponentType::NOTGate) ? 3 : 4;
+                int nVDD2 = comp->pin(vddPin).nodeId;
+                int nGND2 = comp->pin(gndPin).nodeId;
+                double vVDD2 = (nVDD2 > 0 && nVDD2 <= numNodes) ? x(nVDD2 - 1) : 0.0;
+                double vGND2 = (nGND2 > 0 && nGND2 <= numNodes) ? x(nGND2 - 1) : 0.0;
+                vDrop = vVDD2 - vGND2;
+                current = (vVDD2 - vGND2) / (NOTGate::R_on + NOTGate::R_off);
             } else if (comp->type() == ComponentType::DCCurrentSource) {
                 current = comp->value();
             } else if (comp->value() > 0.0) {

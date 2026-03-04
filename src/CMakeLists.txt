@@ -21,6 +21,12 @@ set(SOURCES
     core/components/Inductor.cpp
     core/components/Diode.cpp
     core/components/ZenerDiode.cpp
+    core/components/NMosfet.cpp
+    core/components/PMosfet.cpp
+    core/components/NOTGate.cpp
+    core/components/ANDGate.cpp
+    core/components/ORGate.cpp
+    core/components/XORGate.cpp
     core/components/Ground.cpp
 
     # Simulation
@@ -54,6 +60,12 @@ set(SOURCES
     ui/graphics/items/GInductor.cpp
     ui/graphics/items/GDiode.cpp
     ui/graphics/items/GZenerDiode.cpp
+    ui/graphics/items/GNMosfet.cpp
+    ui/graphics/items/GPMosfet.cpp
+    ui/graphics/items/GNOTGate.cpp
+    ui/graphics/items/GANDGate.cpp
+    ui/graphics/items/GORGate.cpp
+    ui/graphics/items/GXORGate.cpp
     ui/graphics/items/GGround.cpp
 )
 

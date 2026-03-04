@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <g fill="none" stroke="#222" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Input leads -->
+    <line x1="4" y1="22" x2="20" y2="22"/>
+    <line x1="4" y1="42" x2="20" y2="42"/>
+    <!-- OR body -->
+    <path d="M14,14 Q38,14 48,32 Q38,50 14,50 Q24,32 14,14 Z"/>
+    <!-- Extra XOR input curve -->
+    <path d="M10,14 Q20,32 10,50"/>
+    <!-- Output lead -->
+    <line x1="48" y1="32" x2="60" y2="32"/>
+  </g>
+</svg>

@@ -137,6 +137,15 @@ ComponentToolbar::ComponentToolbar(QWidget* parent)
     addButtonToSection(passives, ":/icons/inductor.svg", "Inductor", "Inductor\nDrag to place", ComponentType::Inductor);
     addButtonToSection(passives, ":/icons/diode.svg", "Diode", "Diode\nDrag to place", ComponentType::Diode);
     addButtonToSection(passives, ":/icons/zener_diode.svg", "Zener", "Zener Diode\nDrag to place", ComponentType::ZenerDiode);
+    addButtonToSection(passives, ":/icons/nmosfet.svg", "NMOS", "N-Channel MOSFET\nDrag to place", ComponentType::NMosfet);
+    addButtonToSection(passives, ":/icons/pmosfet.svg", "PMOS", "P-Channel MOSFET\nDrag to place", ComponentType::PMosfet);
+
+    // --- Logic Gates ---
+    auto* gates = addSection(containerLayout, tr("Logic Gates"));
+    addButtonToSection(gates, ":/icons/not_gate.svg", "NOT", "NOT Gate (Inverter)\nDrag to place", ComponentType::NOTGate);
+    addButtonToSection(gates, ":/icons/and_gate.svg", "AND", "AND Gate\nDrag to place", ComponentType::ANDGate);
+    addButtonToSection(gates, ":/icons/or_gate.svg", "OR", "OR Gate\nDrag to place", ComponentType::ORGate);
+    addButtonToSection(gates, ":/icons/xor_gate.svg", "XOR", "XOR Gate\nDrag to place", ComponentType::XORGate);
 
     // --- Loads ---
     auto* loads = addSection(containerLayout, tr("Loads"));

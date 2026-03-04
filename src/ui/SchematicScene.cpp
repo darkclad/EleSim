@@ -12,6 +12,12 @@
 #include "../core/components/Inductor.h"
 #include "../core/components/Diode.h"
 #include "../core/components/ZenerDiode.h"
+#include "../core/components/NMosfet.h"
+#include "../core/components/PMosfet.h"
+#include "../core/components/NOTGate.h"
+#include "../core/components/ANDGate.h"
+#include "../core/components/ORGate.h"
+#include "../core/components/XORGate.h"
 #include "../core/components/Ground.h"
 #include "../core/components/DCCurrentSource.h"
 #include "../core/components/PulseSource.h"
@@ -30,6 +36,12 @@
 #include "graphics/items/GInductor.h"
 #include "graphics/items/GDiode.h"
 #include "graphics/items/GZenerDiode.h"
+#include "graphics/items/GNMosfet.h"
+#include "graphics/items/GPMosfet.h"
+#include "graphics/items/GNOTGate.h"
+#include "graphics/items/GANDGate.h"
+#include "graphics/items/GORGate.h"
+#include "graphics/items/GXORGate.h"
 #include "graphics/items/GGround.h"
 #include "graphics/items/GDCCurrentSource.h"
 #include "graphics/items/GPulseSource.h"
@@ -176,6 +188,42 @@ GraphicComponent* SchematicScene::createComponent(ComponentType type, QPointF po
             auto p = std::make_unique<PulseSource>();
             graphic = new GPulseSource(p.get());
             comp = std::move(p);
+            break;
+        }
+        case ComponentType::NMosfet: {
+            auto m = std::make_unique<NMosfet>();
+            graphic = new GNMosfet(m.get());
+            comp = std::move(m);
+            break;
+        }
+        case ComponentType::PMosfet: {
+            auto m = std::make_unique<PMosfet>();
+            graphic = new GPMosfet(m.get());
+            comp = std::move(m);
+            break;
+        }
+        case ComponentType::NOTGate: {
+            auto g = std::make_unique<NOTGate>();
+            graphic = new GNOTGate(g.get());
+            comp = std::move(g);
+            break;
+        }
+        case ComponentType::ANDGate: {
+            auto g = std::make_unique<ANDGate>();
+            graphic = new GANDGate(g.get());
+            comp = std::move(g);
+            break;
+        }
+        case ComponentType::ORGate: {
+            auto g = std::make_unique<ORGate>();
+            graphic = new GORGate(g.get());
+            comp = std::move(g);
+            break;
+        }
+        case ComponentType::XORGate: {
+            auto g = std::make_unique<XORGate>();
+            graphic = new GXORGate(g.get());
+            comp = std::move(g);
             break;
         }
     }

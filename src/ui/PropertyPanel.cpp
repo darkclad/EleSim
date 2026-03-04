@@ -6,6 +6,12 @@
 #include "../core/components/Switch3Way.h"
 #include "../core/components/Switch4Way.h"
 #include "../core/components/ZenerDiode.h"
+#include "../core/components/NMosfet.h"
+#include "../core/components/PMosfet.h"
+#include "../core/components/NOTGate.h"
+#include "../core/components/ANDGate.h"
+#include "../core/components/ORGate.h"
+#include "../core/components/XORGate.h"
 
 #include <cmath>
 
@@ -224,6 +230,12 @@ void PropertyPanel::showProperties(Component* comp)
         case ComponentType::ZenerDiode: m_typeLabel->setText(tr("Zener Diode")); break;
         case ComponentType::PulseSource: m_typeLabel->setText(tr("Pulse Source")); break;
         case ComponentType::DCCurrentSource: m_typeLabel->setText(tr("DC Current Source")); break;
+        case ComponentType::NMosfet: m_typeLabel->setText(tr("N-Channel MOSFET")); break;
+        case ComponentType::PMosfet: m_typeLabel->setText(tr("P-Channel MOSFET")); break;
+        case ComponentType::NOTGate: m_typeLabel->setText(tr("NOT Gate")); break;
+        case ComponentType::ANDGate: m_typeLabel->setText(tr("AND Gate")); break;
+        case ComponentType::ORGate: m_typeLabel->setText(tr("OR Gate")); break;
+        case ComponentType::XORGate: m_typeLabel->setText(tr("XOR Gate")); break;
         default: break;
     }
 

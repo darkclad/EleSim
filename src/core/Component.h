@@ -20,7 +20,13 @@ enum class ComponentType {
     Ground,
     PulseSource,
     DCCurrentSource,
-    ZenerDiode
+    ZenerDiode,
+    NMosfet,
+    PMosfet,
+    NOTGate,
+    ANDGate,
+    ORGate,
+    XORGate
 };
 
 struct Pin {

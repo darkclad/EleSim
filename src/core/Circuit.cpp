@@ -13,6 +13,12 @@
 #include "components/Inductor.h"
 #include "components/Diode.h"
 #include "components/ZenerDiode.h"
+#include "components/NMosfet.h"
+#include "components/PMosfet.h"
+#include "components/NOTGate.h"
+#include "components/ANDGate.h"
+#include "components/ORGate.h"
+#include "components/XORGate.h"
 #include "components/Ground.h"
 
 #include <QJsonArray>
@@ -259,6 +265,12 @@ QString Circuit::generateName(ComponentType type)
         case ComponentType::PulseSource: prefix = "SQ"; break;
         case ComponentType::DCCurrentSource: prefix = "I"; break;
         case ComponentType::ZenerDiode: prefix = "ZD"; break;
+        case ComponentType::NMosfet:  prefix = "M"; break;
+        case ComponentType::PMosfet:  prefix = "M"; break;
+        case ComponentType::NOTGate:  prefix = "U"; break;
+        case ComponentType::ANDGate:  prefix = "U"; break;
+        case ComponentType::ORGate:   prefix = "U"; break;
+        case ComponentType::XORGate:  prefix = "U"; break;
     }
     int num = ++m_nameCounters[type];
     return prefix + QString::number(num);
@@ -293,6 +305,12 @@ static QString componentTypeToString(ComponentType type)
         case ComponentType::PulseSource: return "PulseSource";
         case ComponentType::DCCurrentSource: return "DCCurrentSource";
         case ComponentType::ZenerDiode: return "ZenerDiode";
+        case ComponentType::NMosfet:  return "NMosfet";
+        case ComponentType::PMosfet:  return "PMosfet";
+        case ComponentType::NOTGate:  return "NOTGate";
+        case ComponentType::ANDGate:  return "ANDGate";
+        case ComponentType::ORGate:   return "ORGate";
+        case ComponentType::XORGate:  return "XORGate";
     }
     return "Unknown";
 }
@@ -314,6 +332,12 @@ static ComponentType stringToComponentType(const QString& s)
     if (s == "PulseSource" || s == "SquareWaveSource") return ComponentType::PulseSource;
     if (s == "DCCurrentSource") return ComponentType::DCCurrentSource;
     if (s == "ZenerDiode") return ComponentType::ZenerDiode;
+    if (s == "NMosfet")  return ComponentType::NMosfet;
+    if (s == "PMosfet")  return ComponentType::PMosfet;
+    if (s == "NOTGate")  return ComponentType::NOTGate;
+    if (s == "ANDGate")  return ComponentType::ANDGate;
+    if (s == "ORGate")   return ComponentType::ORGate;
+    if (s == "XORGate")  return ComponentType::XORGate;
     return ComponentType::Resistor; // fallback
 }
 
@@ -348,6 +372,32 @@ QJsonObject Circuit::toJson() const
         if (comp->type() == ComponentType::ZenerDiode) {
             auto* zd = static_cast<ZenerDiode*>(comp.get());
             obj["zenerVoltage"] = zd->zenerVoltage();
+        }
+
+        if (comp->type() == ComponentType::NMosfet) {
+            auto* m = static_cast<NMosfet*>(comp.get());
+            obj["thresholdVoltage"] = m->thresholdVoltage();
+        }
+        if (comp->type() == ComponentType::PMosfet) {
+            auto* m = static_cast<PMosfet*>(comp.get());
+            obj["thresholdVoltage"] = m->thresholdVoltage();
+        }
+
+        if (comp->type() == ComponentType::NOTGate) {
+            auto* g = static_cast<NOTGate*>(comp.get());
+            obj["thresholdVoltage"] = g->thresholdVoltage();
+        }
+        if (comp->type() == ComponentType::ANDGate) {
+            auto* g = static_cast<ANDGate*>(comp.get());
+            obj["thresholdVoltage"] = g->thresholdVoltage();
+        }
+        if (comp->type() == ComponentType::ORGate) {
+            auto* g = static_cast<ORGate*>(comp.get());
+            obj["thresholdVoltage"] = g->thresholdVoltage();
+        }
+        if (comp->type() == ComponentType::XORGate) {
+            auto* g = static_cast<XORGate*>(comp.get());
+            obj["thresholdVoltage"] = g->thresholdVoltage();
         }
 
         if (comp->type() == ComponentType::Switch2Way) {
@@ -471,6 +521,36 @@ std::unique_ptr<Circuit> Circuit::fromJson(const QJsonObject& root)
             case ComponentType::ZenerDiode: {
                 double vz = obj["zenerVoltage"].toDouble(5.1);
                 comp = std::make_unique<ZenerDiode>(value, vz);
+                break;
+            }
+            case ComponentType::NMosfet: {
+                double vth = obj["thresholdVoltage"].toDouble(2.0);
+                comp = std::make_unique<NMosfet>(vth);
+                break;
+            }
+            case ComponentType::PMosfet: {
+                double vth = obj["thresholdVoltage"].toDouble(2.0);
+                comp = std::make_unique<PMosfet>(vth);
+                break;
+            }
+            case ComponentType::NOTGate: {
+                double vth = obj["thresholdVoltage"].toDouble(2.5);
+                comp = std::make_unique<NOTGate>(vth);
+                break;
+            }
+            case ComponentType::ANDGate: {
+                double vth = obj["thresholdVoltage"].toDouble(2.5);
+                comp = std::make_unique<ANDGate>(vth);
+                break;
+            }
+            case ComponentType::ORGate: {
+                double vth = obj["thresholdVoltage"].toDouble(2.5);
+                comp = std::make_unique<ORGate>(vth);
+                break;
+            }
+            case ComponentType::XORGate: {
+                double vth = obj["thresholdVoltage"].toDouble(2.5);
+                comp = std::make_unique<XORGate>(vth);
                 break;
             }
         }

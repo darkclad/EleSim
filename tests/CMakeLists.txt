@@ -20,6 +20,12 @@ set(CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/components/Inductor.cpp
     ${CMAKE_SOURCE_DIR}/src/core/components/Diode.cpp
     ${CMAKE_SOURCE_DIR}/src/core/components/ZenerDiode.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/components/NMosfet.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/components/PMosfet.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/components/NOTGate.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/components/ANDGate.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/components/ORGate.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/components/XORGate.cpp
     ${CMAKE_SOURCE_DIR}/src/core/components/Ground.cpp
     ${CMAKE_SOURCE_DIR}/src/simulation/MNASolver.cpp
 )
@@ -134,3 +140,57 @@ target_compile_definitions(test_zener_diode PRIVATE
     TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/circuits"
 )
 add_test(NAME ZenerDiode COMMAND test_zener_diode)
+
+# --- N-Channel MOSFET Test ---
+qt_add_executable(test_nmosfet test_nmosfet.cpp ${CORE_SOURCES})
+target_link_libraries(test_nmosfet PRIVATE Qt6::Core Qt6::Test Eigen3::Eigen)
+target_include_directories(test_nmosfet PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_nmosfet PRIVATE
+    TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/circuits"
+)
+add_test(NAME NMosfet COMMAND test_nmosfet)
+
+# --- P-Channel MOSFET Test ---
+qt_add_executable(test_pmosfet test_pmosfet.cpp ${CORE_SOURCES})
+target_link_libraries(test_pmosfet PRIVATE Qt6::Core Qt6::Test Eigen3::Eigen)
+target_include_directories(test_pmosfet PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_pmosfet PRIVATE
+    TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/circuits"
+)
+add_test(NAME PMosfet COMMAND test_pmosfet)
+
+# --- NOT Gate Test ---
+qt_add_executable(test_not_gate test_not_gate.cpp ${CORE_SOURCES})
+target_link_libraries(test_not_gate PRIVATE Qt6::Core Qt6::Test Eigen3::Eigen)
+target_include_directories(test_not_gate PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_not_gate PRIVATE
+    TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/circuits"
+)
+add_test(NAME NOTGate COMMAND test_not_gate)
+
+# --- AND Gate Test ---
+qt_add_executable(test_and_gate test_and_gate.cpp ${CORE_SOURCES})
+target_link_libraries(test_and_gate PRIVATE Qt6::Core Qt6::Test Eigen3::Eigen)
+target_include_directories(test_and_gate PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_and_gate PRIVATE
+    TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/circuits"
+)
+add_test(NAME ANDGate COMMAND test_and_gate)
+
+# --- OR Gate Test ---
+qt_add_executable(test_or_gate test_or_gate.cpp ${CORE_SOURCES})
+target_link_libraries(test_or_gate PRIVATE Qt6::Core Qt6::Test Eigen3::Eigen)
+target_include_directories(test_or_gate PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_or_gate PRIVATE
+    TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/circuits"
+)
+add_test(NAME ORGate COMMAND test_or_gate)
+
+# --- XOR Gate Test ---
+qt_add_executable(test_xor_gate test_xor_gate.cpp ${CORE_SOURCES})
+target_link_libraries(test_xor_gate PRIVATE Qt6::Core Qt6::Test Eigen3::Eigen)
+target_include_directories(test_xor_gate PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_xor_gate PRIVATE
+    TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/circuits"
+)
+add_test(NAME XORGate COMMAND test_xor_gate)
