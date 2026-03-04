@@ -1,17 +1,33 @@
 {
-  "version": 1,
-  "components": [
-    { "id": 1, "type": "DCSource", "name": "V1", "value": 5.0, "x": 0, "y": 0, "rotation": 0 },
-    { "id": 2, "type": "NOTGate", "name": "U1", "value": 2.5, "thresholdVoltage": 2.5, "x": 100, "y": 0, "rotation": 0 },
-    { "id": 3, "type": "Resistor", "name": "R1", "value": 1000.0, "x": 200, "y": 0, "rotation": 0 },
-    { "id": 4, "type": "Ground", "name": "GND1", "value": 0, "x": 0, "y": 100, "rotation": 0 }
-  ],
-  "wires": [
-    { "comp1": 1, "pin1": 0, "comp2": 2, "pin2": 2 },
-    { "comp1": 1, "pin1": 1, "comp2": 4, "pin2": 0 },
-    { "comp1": 2, "pin1": 0, "comp2": 4, "pin2": 0 },
-    { "comp1": 2, "pin1": 3, "comp2": 4, "pin2": 0 },
-    { "comp1": 2, "pin1": 1, "comp2": 3, "pin2": 0 },
-    { "comp1": 3, "pin1": 1, "comp2": 4, "pin2": 0 }
-  ]
+    "version": 1,
+    "components": [
+        { "id": 1, "type": "DCSource", "name": "V1", "value": 5.0, "x": 100, "y": 120, "rotation": 0 },
+        { "id": 2, "type": "NOTGate", "name": "U1", "value": 2.5, "thresholdVoltage": 2.5, "x": 250, "y": 150, "rotation": 0 },
+        { "id": 3, "type": "Resistor", "name": "R1", "value": 1000.0, "x": 360, "y": 180, "rotation": 90 },
+        { "id": 4, "type": "Ground", "name": "GND1", "value": 0, "x": 250, "y": 260, "rotation": 0 }
+    ],
+    "wires": [
+        {
+            "comp1": 1, "pin1": 0, "comp2": 2, "pin2": 2,
+            "waypoints": [{ "x": 250, "y": 90 }]
+        },
+        {
+            "comp1": 1, "pin1": 1, "comp2": 4, "pin2": 0,
+            "waypoints": [{ "x": 100, "y": 260 }]
+        },
+        {
+            "comp1": 2, "pin1": 0, "comp2": 4, "pin2": 0,
+            "waypoints": [{ "x": 220, "y": 260 }]
+        },
+        {
+            "comp1": 2, "pin1": 3, "comp2": 4, "pin2": 0
+        },
+        {
+            "comp1": 2, "pin1": 1, "comp2": 3, "pin2": 0
+        },
+        {
+            "comp1": 3, "pin1": 1, "comp2": 4, "pin2": 0,
+            "waypoints": [{ "x": 360, "y": 260 }]
+        }
+    ]
 }

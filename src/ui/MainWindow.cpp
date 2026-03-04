@@ -7,6 +7,7 @@
 #include "../core/Circuit.h"
 #include "../core/UndoManager.h"
 #include "../core/components/ACSource.h"
+#include "../core/components/PulseSource.h"
 #include "../core/components/Switch.h"
 #include "../core/components/Switch3Way.h"
 #include "../core/components/Switch4Way.h"
@@ -14,10 +15,12 @@
 #include "graphics/items/GSwitch3Way.h"
 #include "graphics/items/GSwitch4Way.h"
 #include "../simulation/MNASolver.h"
+#include "../simulation/SharedFrameBuffer.h"
 #include "../simulation/SimulationResult.h"
 #include "../simulation/SimulationConfig.h"
 #include "OscilloscopeWidget.h"
 
+#include <QtConcurrent>
 #include <QAction>
 #include <QMenu>
 #include <QMenuBar>
@@ -112,6 +115,16 @@ MainWindow::MainWindow(QWidget* parent)
     addDockWidget(Qt::BottomDockWidgetArea, m_oscilloscope);
     m_oscilloscope->hide();
 
+    // Async simulation watcher
+    m_simWatcher = new QFutureWatcher<void>(this);
+    connect(m_simWatcher, &QFutureWatcher<void>::finished,
+            this, &MainWindow::onSimulationFinished);
+
+    m_streamPollTimer = new QTimer(this);
+    m_streamPollTimer->setInterval(33); // ~30 fps
+    connect(m_streamPollTimer, &QTimer::timeout,
+            this, &MainWindow::onPollStreamingFrames);
+
     createActions();
     createMenus();
     createToolBars();
@@ -200,6 +213,11 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_scene, &SchematicScene::aboutToModifyCircuit,
             this, &MainWindow::saveUndoState);
 
+    // Keep oscilloscope component list in sync when components are added/removed
+    connect(m_scene, &SchematicScene::circuitStructureChanged, this, [this]() {
+        m_oscilloscope->updateComponentList(m_circuit.get());
+    });
+
     // Update undo/redo action states
     connect(m_undoManager, &UndoManager::stateChanged,
             this, [this](bool canUndo, bool canRedo) {
@@ -210,6 +228,12 @@ MainWindow::MainWindow(QWidget* parent)
     // Connect toolbar click to placement mode
     connect(m_componentToolBar, &ComponentToolbar::componentSelected,
             m_scene, &SchematicScene::enterPlaceMode);
+
+    // Clear toolbar highlight when leaving placement mode
+    connect(m_scene, &SchematicScene::modeChanged, this, [this](SceneMode mode) {
+        if (mode != SceneMode::PlaceComponent)
+            m_componentToolBar->clearHighlight();
+    });
 
     // Connect mode changes to status bar
     connect(m_scene, &SchematicScene::modeChanged, this, [this](SceneMode mode) {
@@ -225,6 +249,12 @@ MainWindow::MainWindow(QWidget* parent)
                 break;
         }
     });
+
+    // Sync schematic labels with oscilloscope crosshair
+    connect(m_oscilloscope, &OscilloscopeWidget::timePointHovered,
+            m_scene, &SchematicScene::updateMeasurementLabels);
+    connect(m_oscilloscope, &OscilloscopeWidget::timePointLeft,
+            m_scene, &SchematicScene::restoreMeasurementLabels);
 
     // Connect oscilloscope probe changes to schematic highlights
     connect(m_oscilloscope, &OscilloscopeWidget::probeSelectionChanged, this, [this]() {
@@ -246,6 +276,14 @@ MainWindow::MainWindow(QWidget* parent)
         if (ch2Neg.componentId >= 0)
             m_scene->highlightProbePin(ch2Neg.componentId, ch2Neg.pinIndex, QColor(50, 255, 255));
     });
+
+    // Connect schematic pin right-click probe assignment to oscilloscope
+    connect(m_scene, &SchematicScene::probeAssigned,
+            m_oscilloscope, &OscilloscopeWidget::setProbeFromScene);
+
+    // Re-run simulation when oscilloscope view extends beyond data
+    connect(m_oscilloscope, &OscilloscopeWidget::simulationRangeNeeded,
+            this, &MainWindow::onOscilloscopeRangeNeeded);
 
     // Initialize recent files menu
     updateRecentFilesMenu();
@@ -409,6 +447,7 @@ void MainWindow::restoreCircuit(const QJsonObject& state)
     m_circuit = Circuit::fromJson(state);
     m_scene->setCircuit(m_circuit.get());
     m_scene->rebuildFromCircuit();
+    m_oscilloscope->updateComponentList(m_circuit.get());
     m_propertyPanel->clearProperties();
     rerunSimulation();
 }
@@ -443,6 +482,10 @@ double MainWindow::detectACFrequency() const
             auto* ac = static_cast<ACSource*>(comp.get());
             if (ac->frequency() > freq)
                 freq = ac->frequency();
+        } else if (comp->type() == ComponentType::PulseSource) {
+            auto* ps = static_cast<PulseSource*>(comp.get());
+            if (ps->frequency() > freq)
+                freq = ps->frequency();
         }
     }
     return freq;
@@ -490,104 +533,281 @@ void MainWindow::onAnalyzeMixed()
     startSimulation(cfg);
 }
 
+void MainWindow::cancelRunningSimulation()
+{
+    if (m_simWatcher->isRunning()) {
+        m_simCancelled.store(true);
+        m_simWatcher->waitForFinished();
+    }
+}
+
 void MainWindow::startSimulation(const SimulationConfig& cfg)
 {
-    SimulationResult result;
-    QString modeName;
+    cancelRunningSimulation();
+    m_streamPollTimer->stop();
+    m_simCancelled.store(false);
 
-    switch (cfg.type) {
-        case AnalysisType::DC:
-            modeName = "DC Analysis";
-            result = MNASolver::solveDC(*m_circuit);
-            break;
-        case AnalysisType::AC:
-            modeName = "AC Analysis";
-            result = MNASolver::solveAC(*m_circuit, cfg.acFrequency);
-            break;
-        case AnalysisType::Mixed:
-            modeName = "DC+AC Analysis";
-            result = MNASolver::solveMixed(*m_circuit, cfg.acFrequency);
-            break;
-        case AnalysisType::Transient: {
-            modeName = "Simulation";
-            result = MNASolver::solveTransient(*m_circuit, cfg.timeStep, cfg.totalTime);
+    m_pendingConfig = cfg;
+    m_pendingKeepView = false;
+    m_pendingResult = SimulationResult();
+    m_pendingTransientResult = TransientResult();
 
-            // Also run full transient for oscilloscope
-            auto tResult = MNASolver::solveTransientFull(*m_circuit, cfg.timeStep, cfg.totalTime);
-            if (tResult.success) {
-                m_oscilloscope->updateComponentList(m_circuit.get());
-                m_oscilloscope->setTransientResult(tResult);
-                m_oscilloscope->show();
-            }
-            break;
+    // Snapshot circuit for thread-safe access
+    QJsonObject circuitJson = m_circuit->toJson();
+
+    m_simulateAction->setEnabled(false);
+    m_stopSimAction->setEnabled(true);
+    statusBar()->showMessage(tr("Simulating..."));
+
+    if (cfg.type == AnalysisType::Transient) {
+        // --- Streaming path ---
+        m_frameBuffer = std::make_shared<SharedFrameBuffer>();
+        m_lastCircuitSnapshot = circuitJson;
+
+        m_circuit->buildNetlist(); // assign node IDs so probes can resolve
+        m_oscilloscope->clearData();
+        m_oscilloscope->setAutoScale(cfg.acFrequency);
+        m_oscilloscope->setStreaming(true);
+        m_oscilloscope->show();
+        m_oscilloscope->updateComponentList(m_circuit.get());
+
+        m_lastTransientState.reset();
+
+        auto buffer = m_frameBuffer;
+        auto* cancelled = &m_simCancelled;
+        auto initialState = TransientState();
+
+        m_simWatcher->setFuture(QtConcurrent::run(
+            [circuitJson, cfg, cancelled, buffer, initialState]() {
+                auto circuit = Circuit::fromJson(circuitJson);
+                if (!circuit) {
+                    buffer->markComplete(false, "Failed to deserialize circuit",
+                                         TransientState());
+                    return;
+                }
+                MNASolver::solveTransientStreaming(
+                    *circuit, cfg.timeStep, cfg.totalTime,
+                    initialState, *buffer, cancelled);
+            }));
+
+        m_streamPollTimer->start();
+    } else {
+        // --- Non-streaming path (DC/AC/Mixed) ---
+        auto* cancelled = &m_simCancelled;
+        auto* pendingResult = &m_pendingResult;
+
+        m_simWatcher->setFuture(QtConcurrent::run(
+            [circuitJson, cfg, cancelled, pendingResult]() {
+                auto circuit = Circuit::fromJson(circuitJson);
+                if (!circuit) {
+                    pendingResult->errorMessage = "Failed to deserialize circuit";
+                    return;
+                }
+                switch (cfg.type) {
+                    case AnalysisType::DC:
+                        *pendingResult = MNASolver::solveDC(*circuit, cancelled);
+                        break;
+                    case AnalysisType::AC:
+                        *pendingResult = MNASolver::solveAC(*circuit, cfg.acFrequency, cancelled);
+                        break;
+                    case AnalysisType::Mixed:
+                        *pendingResult = MNASolver::solveMixed(*circuit, cfg.acFrequency, cancelled);
+                        break;
+                    default: break;
+                }
+            }));
+    }
+}
+
+void MainWindow::onSimulationFinished()
+{
+    // For streaming transient, the poll timer handles completion.
+    // This handler covers DC/AC/Mixed and cancellation cleanup.
+    if (m_pendingConfig.type == AnalysisType::Transient) {
+        if (m_simCancelled.load() && m_frameBuffer) {
+            m_streamPollTimer->stop();
+            m_oscilloscope->setStreaming(false);
+            // Drain remaining frames
+            std::vector<TransientFrame> remaining;
+            m_frameBuffer->drainFrames(remaining);
+            if (!remaining.empty())
+                m_oscilloscope->appendFrames(remaining);
+            // Save state for continuation even on cancellation
+            m_lastTransientState = m_frameBuffer->takeFinalState();
+            m_frameBuffer.reset();
+            m_simulateAction->setEnabled(true);
+            if (!m_simActive)
+                m_stopSimAction->setEnabled(false);
         }
+        return;
     }
 
-    if (!result.success) {
-        QMessageBox::warning(this, tr("Simulation Error"), result.errorMessage);
+    // --- DC/AC/Mixed path ---
+    m_simulateAction->setEnabled(true);
+
+    if (m_simCancelled.load()) {
+        if (!m_simActive)
+            m_stopSimAction->setEnabled(false);
+        return;
+    }
+
+    if (!m_pendingResult.success) {
+        QMessageBox::warning(this, tr("Simulation Error"), m_pendingResult.errorMessage);
         statusBar()->showMessage(tr("Simulation failed"));
         return;
     }
 
-    m_scene->setSimulationResult(result);
-    m_propertyPanel->setCircuit(m_circuit.get());
-    m_propertyPanel->setSimulationConfig(cfg);
-    m_propertyPanel->setSimulationResult(result);
+    m_circuit->buildNetlist();
 
-    m_lastSimConfig = cfg;
+    m_scene->setSimulationResult(m_pendingResult);
+    m_propertyPanel->setCircuit(m_circuit.get());
+    m_propertyPanel->setSimulationConfig(m_pendingConfig);
+    m_propertyPanel->setSimulationResult(m_pendingResult);
+
+    m_lastSimConfig = m_pendingConfig;
     m_simActive = true;
     m_stopSimAction->setEnabled(true);
 
+    QString modeName;
+    switch (m_pendingConfig.type) {
+        case AnalysisType::DC:        modeName = "DC Analysis"; break;
+        case AnalysisType::AC:        modeName = "AC Analysis"; break;
+        case AnalysisType::Mixed:     modeName = "DC+AC Analysis"; break;
+        default: break;
+    }
     statusBar()->showMessage(tr("%1 active").arg(modeName));
+}
+
+void MainWindow::onPollStreamingFrames()
+{
+    if (!m_frameBuffer) return;
+
+    std::vector<TransientFrame> newFrames;
+    m_frameBuffer->drainFrames(newFrames);
+
+    if (!newFrames.empty())
+        m_oscilloscope->appendFrames(newFrames);
+
+    if (m_frameBuffer->isComplete()) {
+        m_streamPollTimer->stop();
+        m_oscilloscope->setStreaming(false);
+
+        if (m_frameBuffer->wasSuccessful()) {
+            m_lastTransientState = m_frameBuffer->takeFinalState();
+
+            // Build SimulationResult from last frame for schematic labels
+            const TransientResult& fullResult = m_oscilloscope->transientResult();
+            if (!fullResult.frames.empty()) {
+                auto tempCircuit = Circuit::fromJson(m_lastCircuitSnapshot);
+                if (tempCircuit) {
+                    m_pendingResult = MNASolver::resultFromLastFrame(fullResult, *tempCircuit);
+                    m_circuit->buildNetlist();
+                    m_scene->setSimulationResult(m_pendingResult);
+                    m_propertyPanel->setCircuit(m_circuit.get());
+                    m_propertyPanel->setSimulationConfig(m_pendingConfig);
+                    m_propertyPanel->setSimulationResult(m_pendingResult);
+                }
+            }
+
+            m_lastSimConfig = m_pendingConfig;
+            m_simActive = true;
+            m_stopSimAction->setEnabled(true);
+            statusBar()->showMessage(tr("Simulation active"));
+        } else {
+            QString err = m_frameBuffer->errorMessage();
+            if (err != "Cancelled") {
+                QMessageBox::warning(this, tr("Simulation Error"), err);
+                statusBar()->showMessage(tr("Simulation failed"));
+            }
+        }
+
+        m_simulateAction->setEnabled(true);
+        m_frameBuffer.reset();
+    }
 }
 
 void MainWindow::onStopSimulation()
 {
+    cancelRunningSimulation();
+    m_streamPollTimer->stop();
+    m_oscilloscope->setStreaming(false);
+    m_frameBuffer.reset();
+    m_lastTransientState.reset();
+
     m_simActive = false;
     m_stopSimAction->setEnabled(false);
+    m_simulateAction->setEnabled(true);
     m_scene->clearSimulationResult();
     m_propertyPanel->clearSimulationResult();
     m_oscilloscope->clearData();
     statusBar()->showMessage(tr("Simulation stopped"));
 }
 
+void MainWindow::onOscilloscopeRangeNeeded(double totalTime)
+{
+    if (!m_simActive || m_lastSimConfig.type != AnalysisType::Transient)
+        return;
+
+    if (totalTime <= m_lastSimConfig.totalTime)
+        return;
+
+    // Don't start another sim if one is already running
+    if (m_simWatcher->isRunning())
+        return;
+
+    SimulationConfig cfg = m_lastSimConfig;
+    cfg.totalTime = totalTime;
+    m_lastSimConfig.totalTime = totalTime;
+    m_pendingConfig = cfg;
+    m_simCancelled.store(false);
+
+    // Continuation: reuse saved solver state
+    m_frameBuffer = std::make_shared<SharedFrameBuffer>();
+
+    auto buffer = m_frameBuffer;
+    auto* cancelled = &m_simCancelled;
+    auto circuitJson = m_lastCircuitSnapshot;
+    auto savedState = m_lastTransientState;
+
+    m_simulateAction->setEnabled(false);
+
+    m_simWatcher->setFuture(QtConcurrent::run(
+        [circuitJson, cfg, cancelled, buffer, savedState]() {
+            auto circuit = Circuit::fromJson(circuitJson);
+            if (!circuit) {
+                buffer->markComplete(false, "Failed to deserialize circuit",
+                                     TransientState());
+                return;
+            }
+            MNASolver::solveTransientStreaming(
+                *circuit, cfg.timeStep, cfg.totalTime,
+                savedState, *buffer, cancelled);
+        }));
+
+    m_oscilloscope->setStreaming(true);
+    m_streamPollTimer->start();
+}
+
 void MainWindow::rerunSimulation()
 {
     if (!m_simActive) return;
+    m_lastTransientState.reset(); // topology may have changed
 
-    SimulationResult result;
-    switch (m_lastSimConfig.type) {
-        case AnalysisType::DC:
-            result = MNASolver::solveDC(*m_circuit);
-            break;
-        case AnalysisType::AC:
-            result = MNASolver::solveAC(*m_circuit, m_lastSimConfig.acFrequency);
-            break;
-        case AnalysisType::Mixed:
-            result = MNASolver::solveMixed(*m_circuit, m_lastSimConfig.acFrequency);
-            break;
-        case AnalysisType::Transient:
-            result = MNASolver::solveTransient(*m_circuit, m_lastSimConfig.timeStep, m_lastSimConfig.totalTime);
-            {
-                auto tResult = MNASolver::solveTransientFull(*m_circuit, m_lastSimConfig.timeStep, m_lastSimConfig.totalTime);
-                if (tResult.success) {
-                    m_oscilloscope->updateComponentList(m_circuit.get());
-                    m_oscilloscope->setTransientResult(tResult);
-                }
-            }
-            break;
+    // For transient sims, re-detect frequency so config and auto-scale update
+    if (m_lastSimConfig.type == AnalysisType::Transient) {
+        double freq = detectACFrequency();
+        if (freq > 0.0) {
+            m_lastSimConfig.timeStep = 1.0 / (freq * 100.0);
+            m_lastSimConfig.totalTime = 5.0 / freq;
+            m_lastSimConfig.acFrequency = freq;
+        } else {
+            m_lastSimConfig.timeStep = 0.001;
+            m_lastSimConfig.totalTime = 0.1;
+            m_lastSimConfig.acFrequency = 0.0;
+        }
     }
 
-    if (result.success) {
-        m_scene->setSimulationResult(result);
-        m_propertyPanel->setCircuit(m_circuit.get());
-        m_propertyPanel->setSimulationConfig(m_lastSimConfig);
-        m_propertyPanel->setSimulationResult(result);
-    } else {
-        m_scene->clearSimulationResult();
-        m_propertyPanel->clearSimulationResult();
-        statusBar()->showMessage(tr("Simulation: %1").arg(result.errorMessage));
-    }
+    startSimulation(m_lastSimConfig);
 }
 
 // --- File operations ---
@@ -600,6 +820,7 @@ void MainWindow::onNewCircuit()
     m_circuit = std::make_unique<Circuit>();
     m_scene->setCircuit(m_circuit.get());
     m_scene->rebuildFromCircuit();
+    m_oscilloscope->updateComponentList(m_circuit.get());
     m_currentFilePath.clear();
     m_undoManager->clear();
     markClean();
@@ -649,6 +870,7 @@ void MainWindow::openFile(const QString& filePath)
     m_circuit = std::move(loaded);
     m_scene->setCircuit(m_circuit.get());
     m_scene->rebuildFromCircuit();
+    m_oscilloscope->updateComponentList(m_circuit.get());
     m_currentFilePath = filePath;
     m_undoManager->clear();
     addRecentFile(filePath);
@@ -664,6 +886,10 @@ void MainWindow::openFile(const QString& filePath)
     } else {
         m_view->setViewState(1.0, QPointF(0, 0));
     }
+
+    // Restore oscilloscope settings
+    if (root.contains("oscilloscope"))
+        m_oscilloscope->restoreSettings(root["oscilloscope"].toObject());
 
     markClean();
     statusBar()->showMessage(tr("Opened: %1").arg(filePath));
@@ -685,6 +911,9 @@ void MainWindow::onSaveCircuit()
     viewObj["centerX"] = center.x();
     viewObj["centerY"] = center.y();
     root["view"] = viewObj;
+
+    // Save oscilloscope settings
+    root["oscilloscope"] = m_oscilloscope->saveSettings();
 
     QJsonDocument doc(root);
 
@@ -722,6 +951,7 @@ void MainWindow::onSaveCircuitAs()
 void MainWindow::rebuildSceneFromCircuit()
 {
     m_scene->rebuildFromCircuit();
+    m_oscilloscope->updateComponentList(m_circuit.get());
 }
 
 // --- Recent Files ---

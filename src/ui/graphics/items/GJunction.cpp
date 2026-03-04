@@ -23,7 +23,7 @@ void GJunction::setupPins()
 
 void GJunction::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::darkGreen, 1.5));
+    painter->setPen(symbolPen(Qt::darkGreen, 1.5));
     painter->setBrush(QBrush(Qt::darkGreen));
     painter->drawEllipse(QPointF(0, 0), 4.0, 4.0);
 }

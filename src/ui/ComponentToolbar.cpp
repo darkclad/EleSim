@@ -191,14 +191,34 @@ void ComponentToolbar::addButtonToSection(CollapsibleSection* section,
     btn->setToolTip(tooltip);
     btn->setMinimumSize(72, 52);
     btn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    btn->setCheckable(true);
+    btn->setStyleSheet(
+        "QToolButton:checked { background: #cce0ff; border: 2px solid #0078d7; }"
+    );
 
     QFont f = btn->font();
     f.setPixelSize(10);
     btn->setFont(f);
 
     connect(btn, &QToolButton::clicked, this, [this, type]() {
+        highlightComponent(type);
         emit componentSelected(type);
     });
 
+    m_buttons[static_cast<int>(type)] = btn;
     section->contentLayout()->addWidget(btn);
+}
+
+void ComponentToolbar::highlightComponent(ComponentType type)
+{
+    for (auto it = m_buttons.begin(); it != m_buttons.end(); ++it) {
+        it.value()->setChecked(it.key() == static_cast<int>(type));
+    }
+}
+
+void ComponentToolbar::clearHighlight()
+{
+    for (auto* btn : m_buttons) {
+        btn->setChecked(false);
+    }
 }

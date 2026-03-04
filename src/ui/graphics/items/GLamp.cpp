@@ -79,7 +79,7 @@ void GLamp::drawSymbol(QPainter* painter)
         fillColor = QColor(std::min(r, 255), std::min(g, 255), std::min(b, 255));
     }
 
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(QBrush(fillColor));
 
     // Circle

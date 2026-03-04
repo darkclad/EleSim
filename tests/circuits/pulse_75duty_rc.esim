@@ -1,50 +1,97 @@
 {
-    "version": 1,
     "components": [
         {
-            "id": 1,
-            "type": "PulseSource",
-            "name": "V1",
-            "value": 5.0,
-            "frequency": 100.0,
-            "phase": 0.0,
             "dutyCycle": 0.75,
-            "x": 50.0,
-            "y": 130.0,
-            "rotation": 0.0
+            "frequency": 100000,
+            "id": 1,
+            "name": "V1",
+            "phase": 0,
+            "rotation": 0,
+            "type": "PulseSource",
+            "value": 5,
+            "x": 100,
+            "y": 200
         },
         {
             "id": 2,
-            "type": "Resistor",
             "name": "R1",
-            "value": 1000.0,
-            "x": 150.0,
-            "y": 100.0,
-            "rotation": 0.0
+            "rotation": 0,
+            "type": "Resistor",
+            "value": 1000,
+            "x": 240,
+            "y": 180
         },
         {
             "id": 3,
-            "type": "Capacitor",
             "name": "C1",
-            "value": 0.0001,
-            "x": 250.0,
-            "y": 130.0,
-            "rotation": 270.0
+            "rotation": 90,
+            "type": "Capacitor",
+            "value": 1e-04,
+            "x": 340,
+            "y": 200
         },
         {
             "id": 4,
-            "type": "Ground",
             "name": "GND1",
-            "value": 0.0,
-            "x": 200.0,
-            "y": 230.0,
-            "rotation": 0.0
+            "rotation": 0,
+            "type": "Ground",
+            "value": 0,
+            "x": 200,
+            "y": 300
         }
     ],
+    "oscilloscope": {
+        "ch1Enabled": true,
+        "ch1Mode": 0,
+        "ch1Neg": 301,
+        "ch1Pos": 100,
+        "ch2Enabled": true,
+        "ch2Mode": 0,
+        "ch2Neg": -1,
+        "ch2Pos": -1
+    },
+    "version": 1,
+    "view": {
+        "centerX": -1,
+        "centerY": -1,
+        "zoom": 1
+    },
     "wires": [
-        { "comp1": 1, "pin1": 0, "comp2": 2, "pin2": 0 },
-        { "comp1": 2, "pin1": 1, "comp2": 3, "pin2": 0 },
-        { "comp1": 3, "pin1": 1, "comp2": 4, "pin2": 0 },
-        { "comp1": 1, "pin1": 1, "comp2": 4, "pin2": 0 }
+        {
+            "comp1": 1,
+            "comp2": 2,
+            "pin1": 0,
+            "pin2": 0
+        },
+        {
+            "comp1": 2,
+            "comp2": 3,
+            "pin1": 1,
+            "pin2": 0
+        },
+        {
+            "comp1": 3,
+            "comp2": 4,
+            "pin1": 1,
+            "pin2": 0,
+            "waypoints": [
+                {
+                    "x": 330,
+                    "y": 290
+                }
+            ]
+        },
+        {
+            "comp1": 1,
+            "comp2": 4,
+            "pin1": 1,
+            "pin2": 0,
+            "waypoints": [
+                {
+                    "x": 100,
+                    "y": 290
+                }
+            ]
+        }
     ]
 }

@@ -32,7 +32,7 @@ void GSwitch::drawSymbol(QPainter* painter)
 {
     auto* sw = static_cast<Switch*>(m_coreComponent);
 
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Lead lines
@@ -48,11 +48,11 @@ void GSwitch::drawSymbol(QPainter* painter)
     painter->setBrush(Qt::NoBrush);
     if (sw->isClosed()) {
         // Closed: arm horizontal
-        painter->setPen(QPen(Qt::darkGreen, 2.5));
+        painter->setPen(symbolPen(Qt::darkGreen, 2.5));
         painter->drawLine(QPointF(-12, 0), QPointF(12, 0));
     } else {
         // Open: arm tilted up
-        painter->setPen(QPen(Qt::darkRed, 2.5));
+        painter->setPen(symbolPen(Qt::darkRed, 2.5));
         painter->drawLine(QPointF(-12, 0), QPointF(10, -12));
     }
 }

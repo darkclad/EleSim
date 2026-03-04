@@ -41,7 +41,7 @@ void GSwitch4Way::drawSymbol(QPainter* painter)
 {
     auto* sw = static_cast<Switch4Way*>(m_coreComponent);
 
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Lead lines
@@ -59,7 +59,7 @@ void GSwitch4Way::drawSymbol(QPainter* painter)
 
     // Connection lines
     painter->setBrush(Qt::NoBrush);
-    painter->setPen(QPen(Qt::darkGreen, 2.5));
+    painter->setPen(symbolPen(Qt::darkGreen, 2.5));
     if (!sw->isCrossed()) {
         // Straight: 0-2, 1-3
         painter->drawLine(QPointF(-12, -15), QPointF(12, -15));

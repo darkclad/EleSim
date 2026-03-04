@@ -66,6 +66,7 @@ public:
     int branchIndex() const { return m_branchIndex; }
     void setBranchIndex(int idx) { m_branchIndex = idx; }
     virtual bool isVoltageSource() const { return false; }
+    virtual bool isSource() const { return false; }
 
     // Position (for serialization and graphic sync)
     QPointF position() const { return m_position; }

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../Component.h"
+#include "Source.h"
 
-class PulseSource : public Component
+class PulseSource : public Source
 {
 public:
     explicit PulseSource(double amplitude = 5.0, double frequency = 1000.0,

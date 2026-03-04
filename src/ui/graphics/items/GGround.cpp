@@ -20,7 +20,7 @@ void GGround::setupPins()
 
 void GGround::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::black, 2.0));
+    painter->setPen(symbolPen());
 
     // Vertical line from pin down
     painter->drawLine(QPointF(0, 0), QPointF(0, 6));

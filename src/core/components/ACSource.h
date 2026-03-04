@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../Component.h"
+#include "Source.h"
 
-class ACSource : public Component
+class ACSource : public Source
 {
 public:
     explicit ACSource(double amplitude = 5.0, double frequency = 50.0, double phase = 0.0);

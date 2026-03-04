@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QToolBar>
+#include <QMap>
 #include "core/Component.h"
 
 class QToolButton;
@@ -13,6 +14,9 @@ class ComponentToolbar : public QToolBar
 public:
     explicit ComponentToolbar(QWidget* parent = nullptr);
 
+    void highlightComponent(ComponentType type);
+    void clearHighlight();
+
 signals:
     void componentSelected(ComponentType type);
 
@@ -21,4 +25,6 @@ private:
     void addButtonToSection(CollapsibleSection* section,
                             const QString& iconPath, const QString& text,
                             const QString& tooltip, ComponentType type);
+
+    QMap<int, QToolButton*> m_buttons; // ComponentType -> button
 };

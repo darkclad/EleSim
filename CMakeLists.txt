@@ -17,7 +17,7 @@ if(CMAKE_EXE_LINKER_FLAGS MATCHES "-static")
         "${CMAKE_CXX_STANDARD_LIBRARIES} -Wl,--start-group -lharfbuzz -lfreetype -lbz2 -lbrotlidec -lbrotlicommon -lgraphite2 -lglib-2.0 -lintl -liconv -lpng -lz -ljbig -ljpeg -ltiff -llzma -lzstd -ldeflate -lLerc -lwebp -lwebpdemux -lwebpmux -lsharpyuv -lpcre2-16 -lb2 -lrpcrt4 -lusp10 -Wl,--end-group")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets SvgWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets SvgWidgets Concurrent)
 
 # Eigen (header-only) - try system install first, fallback to bundled
 find_package(Eigen3 QUIET)

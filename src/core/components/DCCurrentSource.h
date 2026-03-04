@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../Component.h"
+#include "Source.h"
 
-class DCCurrentSource : public Component
+class DCCurrentSource : public Source
 {
 public:
     explicit DCCurrentSource(double current = 0.01);

@@ -74,5 +74,5 @@ set(RESOURCES
 )
 
 qt_add_executable(EleSim ${SOURCES} ${RESOURCES})
-target_link_libraries(EleSim PRIVATE Qt6::Widgets Qt6::SvgWidgets Eigen3::Eigen)
+target_link_libraries(EleSim PRIVATE Qt6::Widgets Qt6::SvgWidgets Qt6::Concurrent Eigen3::Eigen)
 target_include_directories(EleSim PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

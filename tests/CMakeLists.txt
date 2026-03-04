@@ -194,3 +194,12 @@ target_compile_definitions(test_xor_gate PRIVATE
     TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/circuits"
 )
 add_test(NAME XORGate COMMAND test_xor_gate)
+
+# --- AC Resistor + Lamp Loop Test ---
+qt_add_executable(test_ac_resistor_lamp test_ac_resistor_lamp.cpp ${CORE_SOURCES})
+target_link_libraries(test_ac_resistor_lamp PRIVATE Qt6::Core Qt6::Test Eigen3::Eigen)
+target_include_directories(test_ac_resistor_lamp PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_ac_resistor_lamp PRIVATE
+    TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/circuits"
+)
+add_test(NAME ACResistorLamp COMMAND test_ac_resistor_lamp)

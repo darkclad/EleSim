@@ -6,8 +6,8 @@
             "type": "DCSource",
             "name": "V_DC",
             "value": 5.0,
-            "x": 50.0,
-            "y": 90.0,
+            "x": 100.0,
+            "y": 170.0,
             "rotation": 0.0
         },
         {
@@ -17,8 +17,8 @@
             "value": 2.0,
             "frequency": 50.0,
             "phase": 0.0,
-            "x": 50.0,
-            "y": 170.0,
+            "x": 100.0,
+            "y": 230.0,
             "rotation": 0.0
         },
         {
@@ -26,8 +26,8 @@
             "type": "Resistor",
             "name": "R1",
             "value": 1000.0,
-            "x": 170.0,
-            "y": 60.0,
+            "x": 230.0,
+            "y": 140.0,
             "rotation": 0.0
         },
         {
@@ -35,17 +35,17 @@
             "type": "Resistor",
             "name": "R2",
             "value": 2200.0,
-            "x": 270.0,
-            "y": 90.0,
-            "rotation": 270.0
+            "x": 330.0,
+            "y": 170.0,
+            "rotation": 90.0
         },
         {
             "id": 5,
             "type": "Ground",
             "name": "GND1",
             "value": 0.0,
-            "x": 160.0,
-            "y": 200.0,
+            "x": 200.0,
+            "y": 310.0,
             "rotation": 0.0
         }
     ],
@@ -55,8 +55,8 @@
         { "comp1": 3, "pin1": 1, "comp2": 4, "pin2": 0 },
         {
             "comp1": 4, "pin1": 1, "comp2": 2, "pin2": 1,
-            "waypoints": [{"x": 270, "y": 200}]
+            "waypoints": [{"x": 330, "y": 260}]
         },
-        { "comp1": 2, "pin1": 1, "comp2": 5, "pin2": 0 }
+        { "comp1": 2, "pin1": 1, "comp2": 5, "pin2": 0, "waypoints": [{"x": 100, "y": 310}] }
     ]
 }

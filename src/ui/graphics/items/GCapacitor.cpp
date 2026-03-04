@@ -24,7 +24,7 @@ void GCapacitor::setupPins()
 
 void GCapacitor::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Lead lines
@@ -32,7 +32,7 @@ void GCapacitor::drawSymbol(QPainter* painter)
     painter->drawLine(QPointF(4, 0), QPointF(30, 0));
 
     // Two parallel plates
-    painter->setPen(QPen(Qt::black, 3));
+    painter->setPen(symbolPen(Qt::black, 3));
     painter->drawLine(QPointF(-4, -10), QPointF(-4, 10));
     painter->drawLine(QPointF(4, -10), QPointF(4, 10));
 }

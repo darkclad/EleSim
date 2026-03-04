@@ -233,7 +233,7 @@ bool Circuit::isValid(QString& errorMsg) const
     // Check for at least one source (voltage or current)
     bool hasSource = false;
     for (auto& [id, comp] : m_components) {
-        if (comp->isVoltageSource() || comp->type() == ComponentType::DCCurrentSource) {
+        if (comp->isSource()) {
             hasSource = true;
             break;
         }

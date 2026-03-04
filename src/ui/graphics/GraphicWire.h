@@ -29,6 +29,9 @@ public:
     const QVector<QPointF>& waypoints() const { return m_waypoints; }
     bool isUserRouted() const { return m_userRouted; }
 
+    // Route cycling (right-click to switch between auto-route alternatives)
+    void cycleRoute();
+
     // Legacy compatibility
     static QPainterPath manhattanRoute(QPointF start, QPointF end);
 
@@ -72,4 +75,8 @@ private:
     // Segment dragging state
     int m_dragSegment = -1;
     QVector<QPointF> m_dragOrigWaypoints;
+
+    // Route alternatives for cycling
+    mutable QVector<QVector<QPointF>> m_routeAlternatives;
+    int m_preferredRouteIndex = 0;
 };

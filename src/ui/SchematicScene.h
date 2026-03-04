@@ -7,6 +7,8 @@
 #include "core/Component.h"
 #include "simulation/SimulationResult.h"
 
+struct TransientFrame;
+
 class Circuit;
 class GraphicComponent;
 class GraphicWire;
@@ -58,6 +60,8 @@ public:
     void setSimulationResult(const SimulationResult& result);
     void clearSimulationResult();
     bool hasSimulationResult() const { return m_simResult.success; }
+    void updateMeasurementLabels(const TransientFrame& frame);
+    void restoreMeasurementLabels();
 
     // Rebuild scene from circuit data (after load)
     void rebuildFromCircuit();
@@ -73,6 +77,8 @@ signals:
     void componentDoubleClicked(Component* comp);
     void simulationRecalcNeeded();
     void aboutToModifyCircuit();
+    void probeAssigned(int componentId, int pinIndex, int channel, bool positive);
+    void circuitStructureChanged();
 
 protected:
     void drawBackground(QPainter* painter, const QRectF& rect) override;

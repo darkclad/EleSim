@@ -43,8 +43,8 @@ void GraphicWire::updatePath()
     QPointF start = m_startPin->scenePos();
     QPointF end = m_endPin->scenePos();
 
-    if (m_userRouted && !m_waypoints.isEmpty()) {
-        // Shift waypoints when an endpoint moves (component drag)
+    if (!m_waypoints.isEmpty()) {
+        // Shift existing waypoints when an endpoint moves (drag or rotate)
         QPointF deltaStart = start - m_prevStartPos;
         QPointF deltaEnd = end - m_prevEndPos;
         bool startMoved = std::abs(deltaStart.x()) > 0.5 || std::abs(deltaStart.y()) > 0.5;
@@ -61,6 +61,9 @@ void GraphicWire::updatePath()
             }
             if (m_coreWire)
                 m_coreWire->setWaypoints(m_waypoints);
+
+            // Invalidate cached route alternatives — obstacles changed
+            m_routeAlternatives.clear();
         }
     } else {
         m_waypoints = autoRoute(start, end);
@@ -116,26 +119,126 @@ void GraphicWire::setWaypoints(const QVector<QPointF>& waypoints)
 
 QVector<QPointF> GraphicWire::autoRoute(QPointF start, QPointF end) const
 {
+    m_routeAlternatives.clear();
+
     // Straight line - no waypoints needed
     if (std::abs(start.x() - end.x()) < 0.5 || std::abs(start.y() - end.y()) < 0.5) {
+        m_routeAlternatives.append(QVector<QPointF>());
         return {};
     }
 
     QVector<QRectF> obstacles = getObstacles();
 
-    // L-route A: horizontal first (corner at end.x, start.y)
-    QVector<QPointF> routeA = {QPointF(end.x(), start.y())};
-    int scoreA = countRouteIntersections(start, routeA, end, obstacles);
+    struct Candidate {
+        QVector<QPointF> waypoints;
+        int score;
+        qreal length;
+    };
 
-    // L-route B: vertical first (corner at start.x, end.y)
-    QVector<QPointF> routeB = {QPointF(start.x(), end.y())};
-    int scoreB = countRouteIntersections(start, routeB, end, obstacles);
+    auto calcLength = [&](const QVector<QPointF>& wp) {
+        QVector<QPointF> all;
+        all << start << wp << end;
+        qreal len = 0;
+        for (int i = 0; i < all.size() - 1; ++i)
+            len += std::abs(all[i+1].x() - all[i].x()) + std::abs(all[i+1].y() - all[i].y());
+        return len;
+    };
 
-    if (scoreA == 0) return routeA;
-    if (scoreB == 0) return routeB;
+    QVector<Candidate> candidates;
 
-    // Both intersect - return the one with fewer intersections
-    return (scoreA <= scoreB) ? routeA : routeB;
+    auto tryRoute = [&](const QVector<QPointF>& wp) {
+        // Deduplicate: skip if identical waypoints already exist
+        for (const auto& c : candidates) {
+            if (c.waypoints == wp) return;
+        }
+        int score = countRouteIntersections(start, wp, end, obstacles);
+        candidates.append({wp, score, calcLength(wp)});
+    };
+
+    // L-routes (1 waypoint, 2 segments)
+    tryRoute({QPointF(end.x(), start.y())});
+    tryRoute({QPointF(start.x(), end.y())});
+
+    // Z-routes through midpoint (2 waypoints, 3 segments)
+    qreal midX = std::round(((start.x() + end.x()) / 2.0) / GRID_SIZE) * GRID_SIZE;
+    qreal midY = std::round(((start.y() + end.y()) / 2.0) / GRID_SIZE) * GRID_SIZE;
+    tryRoute({QPointF(midX, start.y()), QPointF(midX, end.y())});
+    tryRoute({QPointF(start.x(), midY), QPointF(end.x(), midY)});
+
+    // U-routes: go around all obstacles in the routing area
+    constexpr qreal CLEARANCE = 40.0; // 2 grid spaces
+
+    qreal boundsLeft = std::min(start.x(), end.x());
+    qreal boundsRight = std::max(start.x(), end.x());
+    qreal boundsTop = std::min(start.y(), end.y());
+    qreal boundsBottom = std::max(start.y(), end.y());
+
+    QRectF routeArea(boundsLeft - GRID_SIZE, boundsTop - GRID_SIZE,
+                     (boundsRight - boundsLeft) + 2 * GRID_SIZE,
+                     (boundsBottom - boundsTop) + 2 * GRID_SIZE);
+
+    for (const auto& obs : obstacles) {
+        if (obs.intersects(routeArea)) {
+            boundsLeft = std::min(boundsLeft, obs.left());
+            boundsRight = std::max(boundsRight, obs.right());
+            boundsTop = std::min(boundsTop, obs.top());
+            boundsBottom = std::max(boundsBottom, obs.bottom());
+        }
+    }
+
+    qreal uLeft  = std::round((boundsLeft  - CLEARANCE) / GRID_SIZE) * GRID_SIZE;
+    qreal uRight = std::round((boundsRight + CLEARANCE) / GRID_SIZE) * GRID_SIZE;
+    qreal uTop   = std::round((boundsTop   - CLEARANCE) / GRID_SIZE) * GRID_SIZE;
+    qreal uBot   = std::round((boundsBottom+ CLEARANCE) / GRID_SIZE) * GRID_SIZE;
+
+    // U going left/right (vertical detour)
+    tryRoute({QPointF(uLeft,  start.y()), QPointF(uLeft,  end.y())});
+    tryRoute({QPointF(uRight, start.y()), QPointF(uRight, end.y())});
+    // U going up/down (horizontal detour)
+    tryRoute({QPointF(start.x(), uTop), QPointF(end.x(), uTop)});
+    tryRoute({QPointF(start.x(), uBot), QPointF(end.x(), uBot)});
+
+    // Sort: fewest intersections, then shortest length
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        if (a.score != b.score) return a.score < b.score;
+        return a.length < b.length;
+    });
+
+    // Store all alternatives for cycling
+    for (const auto& c : candidates) {
+        m_routeAlternatives.append(c.waypoints);
+    }
+
+    // Return the preferred alternative (clamped to valid range)
+    int idx = m_preferredRouteIndex % m_routeAlternatives.size();
+    return m_routeAlternatives[idx];
+}
+
+// --- Route cycling ---
+
+void GraphicWire::cycleRoute()
+{
+    if (!m_startPin || !m_endPin) return;
+
+    QPointF start = m_startPin->scenePos();
+    QPointF end = m_endPin->scenePos();
+
+    // Recompute alternatives if empty (e.g. wire was user-routed)
+    if (m_routeAlternatives.isEmpty()) {
+        autoRoute(start, end);
+    }
+
+    if (m_routeAlternatives.size() <= 1) return;
+
+    // Advance to next alternative
+    m_preferredRouteIndex = (m_preferredRouteIndex + 1) % m_routeAlternatives.size();
+    m_waypoints = m_routeAlternatives[m_preferredRouteIndex];
+    m_userRouted = false; // Stay in auto-routing mode
+
+    if (m_coreWire)
+        m_coreWire->setWaypoints(m_waypoints);
+
+    setPath(buildPath(start, m_waypoints, end));
 }
 
 QVector<QRectF> GraphicWire::getObstacles() const
@@ -154,7 +257,7 @@ QVector<QRectF> GraphicWire::getObstacles() const
         if (gc->opacity() < 0.9) continue;
 
         QRectF rect = gc->sceneBoundingRect();
-        rect.adjust(-5, -5, 5, 5); // small padding
+        rect.adjust(-20, -20, 20, 20); // one grid space clearance
         obstacles.append(rect);
     }
     return obstacles;
@@ -266,6 +369,14 @@ int GraphicWire::segmentAt(const QPointF& scenePos) const
 
 void GraphicWire::mousePressEvent(QGraphicsSceneMouseEvent* event)
 {
+    if (event->button() == Qt::RightButton && isSelected()) {
+        // Right-click on selected wire: cycle auto-route alternative
+        if (auto* ss = dynamic_cast<SchematicScene*>(scene()))
+            ss->notifyAboutToModify();
+        cycleRoute();
+        event->accept();
+        return;
+    }
     if (event->button() == Qt::LeftButton && isSelected()) {
         // Wire is already selected - start segment drag
         int seg = segmentAt(event->scenePos());

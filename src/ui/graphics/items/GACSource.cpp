@@ -29,7 +29,7 @@ void GACSource::setupPins()
 
 void GACSource::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Circle
@@ -53,6 +53,6 @@ void GACSource::drawSymbol(QPainter* painter)
             sinePath.lineTo(x, y);
         }
     }
-    painter->setPen(QPen(Qt::black, 1.5));
+    painter->setPen(symbolPen(Qt::black, 1.5));
     painter->drawPath(sinePath);
 }

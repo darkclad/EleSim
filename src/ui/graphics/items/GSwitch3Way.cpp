@@ -38,7 +38,7 @@ void GSwitch3Way::drawSymbol(QPainter* painter)
 {
     auto* sw = static_cast<Switch3Way*>(m_coreComponent);
 
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Lead lines
@@ -54,7 +54,7 @@ void GSwitch3Way::drawSymbol(QPainter* painter)
 
     // Switch arm from common to active position
     painter->setBrush(Qt::NoBrush);
-    painter->setPen(QPen(Qt::darkGreen, 2.5));
+    painter->setPen(symbolPen(Qt::darkGreen, 2.5));
     if (sw->activePosition() == 0) {
         // Connected to pin1 (top)
         painter->drawLine(QPointF(-12, 0), QPointF(12, -15));

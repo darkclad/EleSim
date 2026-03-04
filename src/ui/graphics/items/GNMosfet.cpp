@@ -29,7 +29,7 @@ void GNMosfet::setupPins()
 
 void GNMosfet::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Gate lead

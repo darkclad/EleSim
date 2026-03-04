@@ -25,7 +25,7 @@ void GDCCurrentSource::setupPins()
 
 void GDCCurrentSource::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Circle
@@ -36,7 +36,7 @@ void GDCCurrentSource::drawSymbol(QPainter* painter)
     painter->drawLine(QPointF(0, 16), QPointF(0, 30));
 
     // Arrow pointing up (current direction: from pin1 to pin0 through source)
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->drawLine(QPointF(0, 10), QPointF(0, -10));
     // Arrowhead
     painter->drawLine(QPointF(0, -10), QPointF(-4, -4));

@@ -25,7 +25,7 @@ void GDiode::setupPins()
 
 void GDiode::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Lead lines
@@ -39,6 +39,6 @@ void GDiode::drawSymbol(QPainter* painter)
     painter->drawPolygon(triangle);
 
     // Cathode bar
-    painter->setPen(QPen(Qt::black, 3));
+    painter->setPen(symbolPen(Qt::black, 3));
     painter->drawLine(QPointF(8, -10), QPointF(8, 10));
 }

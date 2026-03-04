@@ -25,7 +25,7 @@ void GResistor::setupPins()
 
 void GResistor::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Zigzag resistor symbol

@@ -25,7 +25,7 @@ void GZenerDiode::setupPins()
 
 void GZenerDiode::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Lead lines
@@ -40,7 +40,7 @@ void GZenerDiode::drawSymbol(QPainter* painter)
 
     // Zener cathode bar: bent ends (Z-shape)
     // Main vertical bar
-    painter->setPen(QPen(Qt::black, 3));
+    painter->setPen(symbolPen(Qt::black, 3));
     painter->drawLine(QPointF(8, -10), QPointF(8, 10));
     // Top bend (goes left)
     painter->drawLine(QPointF(8, -10), QPointF(5, -10));

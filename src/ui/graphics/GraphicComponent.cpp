@@ -35,6 +35,10 @@ void GraphicComponent::rotateBy(double degrees)
     setRotation(std::fmod(rotation() + degrees, 360.0));
     if (m_coreComponent)
         m_coreComponent->setRotation(rotation());
+    // Update connected wires — rotation changes pin scene positions
+    for (auto* pin : m_pins) {
+        pin->updateConnectedWires();
+    }
 }
 
 void GraphicComponent::rotateClockwise()
@@ -48,11 +52,29 @@ QRectF GraphicComponent::boundingRect() const
     return m_symbolRect.adjusted(-5, -15, 5, 15);
 }
 
+QPen GraphicComponent::symbolPen(const QColor& color, qreal width) const
+{
+    QPen pen(color, width);
+    if (m_ghostMode)
+        pen.setStyle(Qt::DashLine);
+    return pen;
+}
+
+QBrush GraphicComponent::symbolBrush(const QColor& color) const
+{
+    if (m_ghostMode) {
+        QColor ghost = color;
+        ghost.setAlpha(ghost.alpha() / 2);
+        return QBrush(ghost);
+    }
+    return QBrush(color);
+}
+
 void GraphicComponent::paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
                               QWidget* /*widget*/)
 {
-    // Selection highlight
-    if (option->state & QStyle::State_Selected) {
+    // Selection highlight (skip in ghost mode)
+    if (!m_ghostMode && (option->state & QStyle::State_Selected)) {
         QPen selPen(QColor(0, 120, 215), 1.5, Qt::DashLine);
         painter->setPen(selPen);
         painter->setBrush(QBrush(QColor(0, 120, 215, 30)));
@@ -62,8 +84,8 @@ void GraphicComponent::paint(QPainter* painter, const QStyleOptionGraphicsItem* 
     // Draw the component symbol (implemented by subclass)
     drawSymbol(painter);
 
-    // Draw component name and value labels
-    if (m_coreComponent) {
+    // Draw component name and value labels (skip in ghost mode)
+    if (!m_ghostMode && m_coreComponent) {
         QFont font;
         font.setPixelSize(10);
         painter->setFont(font);
@@ -131,6 +153,11 @@ void GraphicComponent::mousePressEvent(QGraphicsSceneMouseEvent* event)
         m_mouseDown = true;
         m_dragging = false;
     } else if (event->button() == Qt::RightButton) {
+        if (!isSelected()) {
+            qDebug() << "[GraphicComponent] right-click ignored, not selected";
+            event->accept();
+            return;
+        }
         emit aboutToRotate();
         double angle = (event->modifiers() & Qt::ShiftModifier) ? 45.0 : 90.0;
         rotateBy(angle);

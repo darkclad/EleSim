@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../Component.h"
+#include "Source.h"
 
-class DCSource : public Component
+class DCSource : public Source
 {
 public:
     explicit DCSource(double voltage = 5.0);

@@ -24,7 +24,7 @@ void GPulseSource::setupPins()
 
 void GPulseSource::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Circle
@@ -35,7 +35,7 @@ void GPulseSource::drawSymbol(QPainter* painter)
     painter->drawLine(QPointF(0, 16), QPointF(0, 30));
 
     // Square/pulse wave inside circle
-    painter->setPen(QPen(Qt::black, 1.5));
+    painter->setPen(symbolPen(Qt::black, 1.5));
     QPainterPath pulsePath;
     // Draw a pulse wave: low → high → low
     pulsePath.moveTo(-10, 5);   // start low

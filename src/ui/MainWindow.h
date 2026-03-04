@@ -2,8 +2,15 @@
 
 #include <QMainWindow>
 #include <QCloseEvent>
+#include <QFutureWatcher>
+#include <QJsonObject>
+#include <QTimer>
+#include <atomic>
 #include <memory>
 #include "../simulation/SimulationConfig.h"
+#include "../simulation/SimulationResult.h"
+#include "../simulation/MNASolver.h"
+#include "../simulation/TransientState.h"
 
 class QAction;
 class QMenu;
@@ -15,6 +22,7 @@ class ComponentToolbar;
 class PropertyPanel;
 class UndoManager;
 class OscilloscopeWidget;
+class SharedFrameBuffer;
 
 class MainWindow : public QMainWindow
 {
@@ -43,6 +51,10 @@ private:
     void startSimulation(const SimulationConfig& cfg);
     void onStopSimulation();
     void rerunSimulation();
+    void onOscilloscopeRangeNeeded(double totalTime);
+    void onSimulationFinished();
+    void onPollStreamingFrames();
+    void cancelRunningSimulation();
     double detectACFrequency() const;
 
     // File operations
@@ -125,4 +137,18 @@ private:
     // --- Simulation state ---
     bool m_simActive = false;
     SimulationConfig m_lastSimConfig;
+
+    // --- Async simulation ---
+    QFutureWatcher<void>* m_simWatcher = nullptr;
+    std::atomic<bool> m_simCancelled{false};
+    SimulationResult m_pendingResult;
+    TransientResult m_pendingTransientResult;
+    SimulationConfig m_pendingConfig;
+    bool m_pendingKeepView = false;  // true = oscilloscope re-sim (preserve zoom/pan)
+
+    // --- Streaming transient ---
+    std::shared_ptr<SharedFrameBuffer> m_frameBuffer;
+    TransientState m_lastTransientState;
+    QTimer* m_streamPollTimer = nullptr;
+    QJsonObject m_lastCircuitSnapshot;
 };

@@ -1,7 +1,7 @@
 #include "DCSource.h"
 
 DCSource::DCSource(double voltage)
-    : Component(ComponentType::DCSource, 2, voltage)
+    : Source(ComponentType::DCSource, 2, voltage)
 {
 }
 

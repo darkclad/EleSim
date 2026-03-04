@@ -1,7 +1,7 @@
 #include "DCCurrentSource.h"
 
 DCCurrentSource::DCCurrentSource(double current)
-    : Component(ComponentType::DCCurrentSource, 2, current)
+    : Source(ComponentType::DCCurrentSource, 2, current)
 {
 }
 

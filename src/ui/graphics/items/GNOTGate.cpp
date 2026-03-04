@@ -33,7 +33,7 @@ void GNOTGate::setupPins()
 
 void GNOTGate::drawSymbol(QPainter* painter)
 {
-    painter->setPen(QPen(Qt::black, 2));
+    painter->setPen(symbolPen());
     painter->setBrush(Qt::NoBrush);
 
     // Input lead

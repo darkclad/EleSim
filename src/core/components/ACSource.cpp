@@ -6,7 +6,7 @@
 #endif
 
 ACSource::ACSource(double amplitude, double frequency, double phase)
-    : Component(ComponentType::ACSource, 2, amplitude)
+    : Source(ComponentType::ACSource, 2, amplitude)
     , m_frequency(frequency)
     , m_phase(phase)
 {

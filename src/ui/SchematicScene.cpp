@@ -1,5 +1,7 @@
 #include "SchematicScene.h"
+#include <QGraphicsView>
 #include "../core/Circuit.h"
+#include "../simulation/MNASolver.h"
 #include "../core/components/Resistor.h"
 #include "../core/components/Capacitor.h"
 #include "../core/components/DCSource.h"
@@ -252,6 +254,7 @@ GraphicComponent* SchematicScene::createComponent(ComponentType type, QPointF po
     connect(graphic, &GraphicComponent::dropCompleted,
             this, &SchematicScene::autoConnectPins, Qt::QueuedConnection);
 
+    emit circuitStructureChanged();
     return graphic;
 }
 
@@ -341,6 +344,8 @@ void SchematicScene::deleteSelectedItems()
 
     updateWireColors();
     emit simulationRecalcNeeded();
+    if (!compsToDelete.empty())
+        emit circuitStructureChanged();
 }
 
 void SchematicScene::cancelOperation()
@@ -580,6 +585,8 @@ void SchematicScene::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
     if (m_mode == SceneMode::PlaceComponent && m_ghostComponent) {
         QPointF snapped = snapToGrid(event->scenePos());
         m_ghostComponent->setPos(snapped);
+        if (!m_ghostComponent->isVisible())
+            m_ghostComponent->setVisible(true);
 
         // Highlight wire under cursor for potential split
         GraphicWire* candidate = wireAt(snapped);
@@ -798,6 +805,10 @@ void SchematicScene::finishWire(GraphicPin* endPin)
     cancelWire();
     setMode(SceneMode::Select);
 
+    // Select the new wire so user can right-click to cycle routes
+    clearSelection();
+    gWire->setSelected(true);
+
     updateWireColors();
 }
 
@@ -876,12 +887,18 @@ void SchematicScene::cancelWire()
 void SchematicScene::onSelectionChanged()
 {
     auto items = selectedItems();
+    qDebug() << "[Scene::selectionChanged] count=" << items.size();
+    for (auto* item : items) {
+        qDebug() << "  selected:" << item << "type=" << item->type();
+    }
     if (items.size() == 1) {
         if (auto* gc = dynamic_cast<GraphicComponent*>(items.first())) {
+            qDebug() << "  -> componentSelected";
             emit componentSelected(gc->coreComponent());
             return;
         }
     }
+    qDebug() << "  -> selectionCleared";
     emit selectionCleared();
 }
 
@@ -977,6 +994,68 @@ void SchematicScene::clearSimulationResult()
     for (auto& [id, gc] : m_graphicComponents) {
         if (auto* gl = dynamic_cast<GLamp*>(gc)) {
             gl->clearCurrent();
+        }
+    }
+}
+
+void SchematicScene::updateMeasurementLabels(const TransientFrame& frame)
+{
+    for (auto& [compId, item] : m_measurementLabels) {
+        auto* textItem = dynamic_cast<QGraphicsTextItem*>(item);
+        if (!textItem) continue;
+
+        double voltage = 0.0, current = 0.0;
+        auto vIt = frame.componentVoltages.find(compId);
+        if (vIt != frame.componentVoltages.end()) voltage = vIt->second;
+        auto iIt = frame.branchCurrents.find(compId);
+        if (iIt != frame.branchCurrents.end()) current = iIt->second;
+        double power = voltage * current;
+
+        QString text = QString("V=%1\nI=%2\nP=%3")
+            .arg(formatEngineering(voltage, "V"))
+            .arg(formatEngineering(current, "A"))
+            .arg(formatEngineering(power, "W"));
+        textItem->setPlainText(text);
+
+        // Update lamp glow
+        auto gcIt = m_graphicComponents.find(compId);
+        if (gcIt != m_graphicComponents.end()) {
+            if (auto* gl = dynamic_cast<GLamp*>(gcIt->second))
+                gl->setCurrent(current);
+        }
+    }
+}
+
+void SchematicScene::restoreMeasurementLabels()
+{
+    for (auto& [compId, item] : m_measurementLabels) {
+        auto* textItem = dynamic_cast<QGraphicsTextItem*>(item);
+        if (!textItem) continue;
+
+        auto brIt = m_simResult.branchResults.find(compId);
+        if (brIt == m_simResult.branchResults.end()) continue;
+        const auto& br = brIt->second;
+
+        QString text;
+        if (br.isMixed) {
+            text = QString("DC: %1 / %2\nAC: %3 / %4")
+                .arg(formatEngineering(br.dcVoltage, "V"))
+                .arg(formatEngineering(br.dcCurrent, "A"))
+                .arg(formatEngineering(br.acVoltage, "V"))
+                .arg(formatEngineering(br.acCurrent, "A"));
+        } else {
+            text = QString("V=%1\nI=%2\nP=%3")
+                .arg(formatEngineering(br.voltageDrop, "V"))
+                .arg(formatEngineering(br.current, "A"))
+                .arg(formatEngineering(br.power, "W"));
+        }
+        textItem->setPlainText(text);
+
+        // Restore lamp glow
+        auto gcIt = m_graphicComponents.find(compId);
+        if (gcIt != m_graphicComponents.end()) {
+            if (auto* gl = dynamic_cast<GLamp*>(gcIt->second))
+                gl->setCurrent(br.current);
         }
     }
 }
@@ -1121,10 +1200,19 @@ void SchematicScene::rebuildFromCircuit()
 
 void SchematicScene::enterPlaceMode(ComponentType type)
 {
+    // Toggle off if clicking the same component type again
+    if (m_mode == SceneMode::PlaceComponent && m_placeType == type) {
+        setMode(SceneMode::Select);
+        return;
+    }
     setMode(SceneMode::PlaceComponent);
     m_placeType = type;
     m_ghostRotation = 0.0;
     createGhostComponent();
+
+    // Ensure the view has keyboard focus so ESC works immediately
+    if (!views().isEmpty())
+        views().first()->setFocus();
 }
 
 void SchematicScene::createGhostComponent()
@@ -1191,11 +1279,37 @@ void SchematicScene::createGhostComponent()
             m_ghostCoreComponent = std::make_unique<PulseSource>();
             m_ghostComponent = new GPulseSource(static_cast<PulseSource*>(m_ghostCoreComponent.get()));
             break;
+        case ComponentType::NMosfet:
+            m_ghostCoreComponent = std::make_unique<NMosfet>();
+            m_ghostComponent = new GNMosfet(static_cast<NMosfet*>(m_ghostCoreComponent.get()));
+            break;
+        case ComponentType::PMosfet:
+            m_ghostCoreComponent = std::make_unique<PMosfet>();
+            m_ghostComponent = new GPMosfet(static_cast<PMosfet*>(m_ghostCoreComponent.get()));
+            break;
+        case ComponentType::NOTGate:
+            m_ghostCoreComponent = std::make_unique<NOTGate>();
+            m_ghostComponent = new GNOTGate(static_cast<NOTGate*>(m_ghostCoreComponent.get()));
+            break;
+        case ComponentType::ANDGate:
+            m_ghostCoreComponent = std::make_unique<ANDGate>();
+            m_ghostComponent = new GANDGate(static_cast<ANDGate*>(m_ghostCoreComponent.get()));
+            break;
+        case ComponentType::ORGate:
+            m_ghostCoreComponent = std::make_unique<ORGate>();
+            m_ghostComponent = new GORGate(static_cast<ORGate*>(m_ghostCoreComponent.get()));
+            break;
+        case ComponentType::XORGate:
+            m_ghostCoreComponent = std::make_unique<XORGate>();
+            m_ghostComponent = new GXORGate(static_cast<XORGate*>(m_ghostCoreComponent.get()));
+            break;
     }
 
     if (!m_ghostComponent) return;
 
-    m_ghostComponent->setOpacity(0.4);
+    m_ghostComponent->setGhostMode(true);
+    m_ghostComponent->setOpacity(0.6);
+    m_ghostComponent->setVisible(false);  // hidden until mouse moves over the scene
     m_ghostComponent->setFlag(QGraphicsItem::ItemIsMovable, false);
     m_ghostComponent->setFlag(QGraphicsItem::ItemIsSelectable, false);
     m_ghostComponent->setFlag(QGraphicsItem::ItemSendsGeometryChanges, false);
@@ -1464,7 +1578,7 @@ void SchematicScene::updateWireColors()
     std::vector<PinKey> queue;
 
     for (auto& [id, comp] : m_circuit->components()) {
-        if (comp->type() == ComponentType::DCSource || comp->type() == ComponentType::ACSource) {
+        if (comp->isSource()) {
             for (int i = 0; i < comp->pinCount(); ++i) {
                 PinKey pk = {id, i};
                 if (powered.insert(pk).second) {

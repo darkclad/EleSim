@@ -5,12 +5,56 @@
 #include <QPainterPath>
 #include <QComboBox>
 #include <QLabel>
+#include <QSlider>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QCheckBox>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <cmath>
 #include <algorithm>
+
+// --- Time formatting helpers ---
+
+// Choose time unit based on the visible span (so all labels on one axis share the same unit)
+struct TimeUnit {
+    double divisor;     // divide seconds by this to get display value
+    const char* suffix; // label suffix
+};
+
+static TimeUnit timeUnitForSpan(double spanSeconds)
+{
+    double absSpan = std::abs(spanSeconds);
+    if (absSpan < 1e-9)  return {1e-12, "ps"};
+    if (absSpan < 1e-6)  return {1e-9,  "ns"};
+    if (absSpan < 1e-3)  return {1e-6,  "\xC2\xB5s"};  // µs in UTF-8
+    if (absSpan < 1.0)   return {1e-3,  "ms"};
+    return {1.0, "s"};
+}
+
+// Format a single time value — picks unit automatically from the value itself
+static QString formatTime(double seconds)
+{
+    double a = std::abs(seconds);
+    if (a < 1e-9)
+        return QString::number(seconds * 1e12, 'f', 1) + "ps";
+    if (a < 1e-6)
+        return QString::number(seconds * 1e9, 'f', 1) + "ns";
+    if (a < 1e-3)
+        return QString::number(seconds * 1e6, 'f', 1) + QString::fromUtf8("\xC2\xB5s");
+    if (a < 1.0)
+        return QString::number(seconds * 1e3, 'f', 1) + "ms";
+    return QString::number(seconds, 'f', 3) + "s";
+}
+
+// Format a time value using a pre-chosen unit (for consistent axis labels)
+static QString formatTimeWithUnit(double seconds, const TimeUnit& unit)
+{
+    double val = seconds / unit.divisor;
+    // Choose decimal places based on magnitude
+    int decimals = (std::abs(val) < 10.0) ? 2 : (std::abs(val) < 100.0) ? 1 : 0;
+    return QString::number(val, 'f', decimals) + QString::fromUtf8(unit.suffix);
+}
 
 // --- OscilloscopeScreen ---
 
@@ -25,6 +69,15 @@ OscilloscopeScreen::OscilloscopeScreen(QWidget* parent)
 void OscilloscopeScreen::setData(const TransientResult& result)
 {
     m_result = result;
+    m_viewStart = 0.0;
+    m_viewEnd = -1.0; // show all
+    update();
+}
+
+void OscilloscopeScreen::setDataKeepView(const TransientResult& result)
+{
+    m_result = result;
+    // Don't reset m_viewStart / m_viewEnd — preserve zoom/pan
     update();
 }
 
@@ -32,7 +85,103 @@ void OscilloscopeScreen::clearData()
 {
     m_result.frames.clear();
     m_result.success = false;
+    m_streaming = false;
     update();
+}
+
+void OscilloscopeScreen::appendFrames(const std::vector<TransientFrame>& newFrames)
+{
+    if (newFrames.empty()) return;
+
+    if (m_result.frames.empty())
+        m_result.success = true;
+
+    m_result.frames.insert(m_result.frames.end(), newFrames.begin(), newFrames.end());
+    update();
+}
+
+void OscilloscopeScreen::setStreaming(bool streaming)
+{
+    m_streaming = streaming;
+    update();
+}
+
+void OscilloscopeScreen::setAutoScale(double frequency)
+{
+    if (frequency <= 0.0) {
+        // No AC frequency — show all
+        m_viewStart = 0.0;
+        m_viewEnd = -1.0;
+        return;
+    }
+
+    // Standard oscilloscope time/div steps (in seconds)
+    // 10 divisions total, pick step so full span shows ~2-5 periods
+    static const double steps[] = {
+        1e-12, 2e-12, 5e-12,   // ps
+        1e-11, 2e-11, 5e-11,   // 10ps
+        1e-10, 2e-10, 5e-10,   // 100ps
+        1e-9,  2e-9,  5e-9,    // ns
+        1e-8,  2e-8,  5e-8,    // 10ns
+        1e-7,  2e-7,  5e-7,    // 100ns
+        1e-6,  2e-6,  5e-6,    // µs
+        1e-5,  2e-5,  5e-5,    // 10µs
+        1e-4,  2e-4,  5e-4,    // 100µs
+        1e-3,  2e-3,  5e-3,    // ms
+        1e-2,  2e-2,  5e-2,    // 10ms
+        1e-1,  2e-1,  5e-1,    // 100ms
+        1.0,   2.0,   5.0,     // s
+    };
+
+    double period = 1.0 / frequency;
+    // We want the total span (10 * step) to show ~3 periods
+    double targetSpan = period * 3.0;
+
+    // Find smallest step where 10*step >= targetSpan
+    double chosenStep = steps[sizeof(steps)/sizeof(steps[0]) - 1];
+    for (double s : steps) {
+        if (s * 10.0 >= targetSpan) {
+            chosenStep = s;
+            break;
+        }
+    }
+
+    m_viewStart = 0.0;
+    m_viewEnd = chosenStep * 10.0;
+}
+
+void OscilloscopeScreen::setViewCenter(double time)
+{
+    if (m_result.frames.empty()) return;
+
+    // If in show-all mode, switch to explicit view
+    if (m_viewEnd < 0) {
+        m_viewStart = 0.0;
+        m_viewEnd = m_result.frames.back().time;
+    }
+
+    double span = m_viewEnd - m_viewStart;
+    m_viewStart = time - span / 2.0;
+    m_viewEnd = m_viewStart + span;
+
+    if (m_viewStart < 0.0) {
+        m_viewEnd -= m_viewStart;
+        m_viewStart = 0.0;
+    }
+
+    update();
+
+    if (!m_result.frames.empty() && m_viewEnd > m_result.frames.back().time)
+        emit viewRangeExceedsData(m_viewEnd);
+
+    emit viewChanged(m_viewStart, m_viewEnd,
+                     m_result.frames.empty() ? 0.0 : m_result.frames.back().time);
+}
+
+double OscilloscopeScreen::dataEndTime() const
+{
+    if (m_result.frames.empty()) return 0.0;
+    return m_result.frames.back().time;
 }
 
 void OscilloscopeScreen::paintEvent(QPaintEvent* /*event*/)
@@ -40,12 +189,12 @@ void OscilloscopeScreen::paintEvent(QPaintEvent* /*event*/)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
 
-    QRect area = rect().adjusted(50, 10, -10, -30);
+    QRect area = plotArea();
 
     // Dark background
     p.fillRect(rect(), QColor(0x1a, 0x1a, 0x2e));
 
-    if (!m_result.success || m_result.frames.empty()) {
+    if ((!m_result.success && !m_streaming) || m_result.frames.empty()) {
         p.setPen(QColor(100, 100, 100));
         p.drawText(rect(), Qt::AlignCenter, "No transient data");
         return;
@@ -154,22 +303,19 @@ void OscilloscopeScreen::drawGrid(QPainter& p, const QRect& area)
 
     // Time axis labels
     if (!m_result.frames.empty()) {
-        double tMax = m_result.frames.back().time;
+        double tStart = visibleStart();
+        double tEnd = visibleEnd();
+        TimeUnit unit = timeUnitForSpan(tEnd - tStart);
+
         p.setPen(QColor(150, 150, 180));
         QFont f = p.font();
         f.setPixelSize(10);
         p.setFont(f);
 
         for (int i = 0; i <= 10; i += 2) {
-            double t = tMax * i / 10.0;
+            double t = tStart + (tEnd - tStart) * i / 10.0;
             int x = area.left() + i * area.width() / 10;
-            QString label;
-            if (t < 0.001)
-                label = QString::number(t * 1e6, 'f', 0) + QString::fromUtf8("\xC2\xB5s");
-            else if (t < 1.0)
-                label = QString::number(t * 1000, 'f', 1) + "ms";
-            else
-                label = QString::number(t, 'f', 2) + "s";
+            QString label = formatTimeWithUnit(t, unit);
             p.drawText(x - 20, area.bottom() + 15, label);
         }
     }
@@ -201,15 +347,16 @@ void OscilloscopeScreen::drawTrace(QPainter& p, const QRect& area,
         m_chUnit[channel] = unit;
     }
 
-    double tMin = times.front();
-    double tMax = times.back();
-    if (std::abs(tMax - tMin) < 1e-15) return;
+    double tStart = visibleStart();
+    double tEnd = visibleEnd();
+    double tSpan = tEnd - tStart;
+    if (tSpan < 1e-15) return;
 
     QPainterPath path;
     bool first = true;
 
     for (size_t i = 0; i < times.size(); ++i) {
-        double nx = (times[i] - tMin) / (tMax - tMin);
+        double nx = (times[i] - tStart) / tSpan;
         double ny = 1.0 - (values[i] - vMin) / (vMax - vMin);
 
         double px = area.left() + nx * area.width();
@@ -233,17 +380,23 @@ void OscilloscopeScreen::drawTrace(QPainter& p, const QRect& area,
     f.setPixelSize(10);
     p.setFont(f);
 
+    // Determine value unit based on the visible range
+    double valRange = vMax - vMin;
+    auto valUnit = [&](double val) -> QString {
+        double a = std::abs(val);
+        if (valRange < 1e-6)
+            return QString::number(val * 1e9, 'f', 1) + "n" + unit;
+        if (valRange < 1e-3)
+            return QString::number(val * 1e6, 'f', 1) + QString::fromUtf8("\xC2\xB5") + unit;
+        if (valRange < 1.0)
+            return QString::number(val * 1e3, 'f', 1) + "m" + unit;
+        return QString::number(val, 'f', 2) + unit;
+    };
+
     for (int i = 0; i <= 4; ++i) {
         double val = vMax - i * (vMax - vMin) / 4.0;
         int y = area.top() + i * area.height() / 4;
-        QString label;
-        if (std::abs(val) < 0.001)
-            label = QString::number(val * 1e6, 'f', 1) + QString::fromUtf8("\xC2\xB5") + unit;
-        else if (std::abs(val) < 1.0)
-            label = QString::number(val * 1000, 'f', 1) + "m" + unit;
-        else
-            label = QString::number(val, 'f', 2) + unit;
-        p.drawText(2, y + 4, label);
+        p.drawText(2, y + 4, valUnit(val));
     }
 }
 
@@ -297,19 +450,12 @@ void OscilloscopeScreen::drawCrosshair(QPainter& p, const QRect& area)
     p.drawLine(area.left(), my, area.right(), my);
 
     // Compute time from X position
-    double nx = static_cast<double>(mx - area.left()) / area.width();
-    int numFrames = static_cast<int>(m_result.frames.size());
-    int idx = std::clamp(static_cast<int>(nx * (numFrames - 1) + 0.5), 0, numFrames - 1);
+    int idx = frameIndexAtX(mx);
+    if (idx < 0) return;
     double t = m_result.frames[idx].time;
 
     // Format time
-    QString timeStr;
-    if (t < 0.001)
-        timeStr = QString::number(t * 1e6, 'f', 1) + QString::fromUtf8("\xC2\xB5s");
-    else if (t < 1.0)
-        timeStr = QString::number(t * 1000, 'f', 2) + "ms";
-    else
-        timeStr = QString::number(t, 'f', 4) + "s";
+    QString timeStr = formatTime(t);
 
     // Build readout text
     QString text = "t=" + timeStr;
@@ -358,17 +504,179 @@ void OscilloscopeScreen::drawCrosshair(QPainter& p, const QRect& area)
     p.drawText(tx, ty + textRect.height() - 2, text);
 }
 
+QRect OscilloscopeScreen::plotArea() const
+{
+    return rect().adjusted(50, 10, -10, -30);
+}
+
+double OscilloscopeScreen::visibleStart() const
+{
+    return m_viewStart;
+}
+
+double OscilloscopeScreen::visibleEnd() const
+{
+    if (m_viewEnd < 0 && !m_result.frames.empty())
+        return m_result.frames.back().time;
+    return (m_viewEnd < 0) ? 1.0 : m_viewEnd;
+}
+
+double OscilloscopeScreen::timeAtX(int x) const
+{
+    QRect area = plotArea();
+    double nx = static_cast<double>(x - area.left()) / area.width();
+    return visibleStart() + nx * (visibleEnd() - visibleStart());
+}
+
+int OscilloscopeScreen::frameIndexAtX(int x) const
+{
+    QRect area = plotArea();
+    if (m_result.frames.empty() || x < area.left() || x > area.right())
+        return -1;
+
+    double t = timeAtX(x);
+    // Binary search for closest frame
+    const auto& frames = m_result.frames;
+    auto it = std::lower_bound(frames.begin(), frames.end(), t,
+        [](const TransientFrame& f, double val) { return f.time < val; });
+
+    if (it == frames.end()) return static_cast<int>(frames.size()) - 1;
+    if (it == frames.begin()) return 0;
+
+    // Pick closest of the two neighbors
+    auto prev = std::prev(it);
+    if (std::abs(it->time - t) < std::abs(prev->time - t))
+        return static_cast<int>(it - frames.begin());
+    return static_cast<int>(prev - frames.begin());
+}
+
+void OscilloscopeScreen::wheelEvent(QWheelEvent* event)
+{
+    if (m_result.frames.empty()) return;
+
+    // Initialize explicit range from show-all on first zoom
+    if (m_viewEnd < 0) {
+        m_viewStart = 0.0;
+        m_viewEnd = m_result.frames.back().time;
+    }
+
+    double span = m_viewEnd - m_viewStart;
+
+    // Mouse position as fraction of plot area
+    QRect area = plotArea();
+    double mx = event->position().x();
+    double frac = (mx - area.left()) / area.width();
+    frac = std::clamp(frac, 0.0, 1.0);
+
+    // Time under cursor
+    double tCursor = m_viewStart + frac * span;
+
+    // Zoom factor: scroll up = zoom in, scroll down = zoom out
+    double factor = (event->angleDelta().y() > 0) ? 0.8 : 1.25;
+    double newSpan = span * factor;
+
+    // Clamp: min 1ps, no max limit
+    static constexpr double MIN_SPAN = 1e-12; // 1ps
+    if (newSpan < MIN_SPAN) newSpan = MIN_SPAN;
+
+    // Keep cursor at same screen fraction
+    m_viewStart = tCursor - frac * newSpan;
+    m_viewEnd = m_viewStart + newSpan;
+
+    // Clamp start >= 0
+    if (m_viewStart < 0.0) {
+        m_viewEnd -= m_viewStart;
+        m_viewStart = 0.0;
+    }
+
+    update();
+
+    // Request more simulation data if view extends beyond existing data
+    if (!m_result.frames.empty() && m_viewEnd > m_result.frames.back().time)
+        emit viewRangeExceedsData(m_viewEnd);
+
+    emit viewChanged(m_viewStart, m_viewEnd,
+                     m_result.frames.empty() ? 0.0 : m_result.frames.back().time);
+}
+
+void OscilloscopeScreen::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        // Initialize explicit range from show-all on first pan
+        if (m_viewEnd < 0 && !m_result.frames.empty()) {
+            m_viewStart = 0.0;
+            m_viewEnd = m_result.frames.back().time;
+        }
+        m_isPanning = true;
+        m_panStartPos = event->pos();
+        m_panStartViewStart = m_viewStart;
+        setCursor(Qt::ClosedHandCursor);
+    }
+}
+
+void OscilloscopeScreen::mouseDoubleClickEvent(QMouseEvent* /*event*/)
+{
+    m_viewStart = 0.0;
+    m_viewEnd = -1.0;
+    update();
+
+    double dataEnd = m_result.frames.empty() ? 0.0 : m_result.frames.back().time;
+    emit viewChanged(0.0, dataEnd, dataEnd);
+}
+
+void OscilloscopeScreen::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton && m_isPanning) {
+        m_isPanning = false;
+        setCursor(Qt::ArrowCursor);
+    }
+}
+
 void OscilloscopeScreen::mouseMoveEvent(QMouseEvent* event)
 {
     m_mousePos = event->position();
     m_showCrosshair = true;
+
+    if (m_isPanning) {
+        QRect area = plotArea();
+        double span = m_viewEnd - m_viewStart;
+        double dx = m_panStartPos.x() - event->pos().x();
+        double dt = dx * span / area.width();
+        double newStart = m_panStartViewStart + dt;
+
+        // Clamp: can't pan before 0
+        if (newStart < 0.0) newStart = 0.0;
+
+        m_viewEnd = newStart + span;
+        m_viewStart = newStart;
+
+        // Request more simulation data if view extends beyond existing data
+        if (!m_result.frames.empty() && m_viewEnd > m_result.frames.back().time)
+            emit viewRangeExceedsData(m_viewEnd);
+
+        emit viewChanged(m_viewStart, m_viewEnd,
+                         m_result.frames.empty() ? 0.0 : m_result.frames.back().time);
+    }
+
     update();
+
+    int idx = frameIndexAtX(static_cast<int>(m_mousePos.x()));
+    if (idx >= 0 && idx != m_lastFrameIndex) {
+        m_lastFrameIndex = idx;
+        emit crosshairFrameChanged(idx);
+    }
 }
 
 void OscilloscopeScreen::leaveEvent(QEvent* /*event*/)
 {
     m_showCrosshair = false;
+    m_lastFrameIndex = -1;
+    if (m_isPanning) {
+        m_isPanning = false;
+        setCursor(Qt::ArrowCursor);
+    }
     update();
+    emit crosshairLeft();
 }
 
 // --- OscilloscopeWidget ---
@@ -441,6 +749,13 @@ OscilloscopeWidget::OscilloscopeWidget(QWidget* parent)
     m_screen = new OscilloscopeScreen;
     layout->addWidget(m_screen);
 
+    // Time slider
+    m_timeSlider = new QSlider(Qt::Horizontal);
+    m_timeSlider->setRange(0, 1000);
+    m_timeSlider->setValue(0);
+    m_timeSlider->setFixedHeight(16);
+    layout->addWidget(m_timeSlider);
+
     setWidget(container);
 
     // Connect combo changes — all combos trigger the same update
@@ -479,6 +794,37 @@ OscilloscopeWidget::OscilloscopeWidget(QWidget* parent)
         m_ch2NegCombo->setVisible(isVoltage);
         m_ch2NegLabel->setVisible(isVoltage);
         onProbeChanged();
+    });
+
+    // Forward crosshair signals with frame data
+    connect(m_screen, &OscilloscopeScreen::crosshairFrameChanged, this, [this](int idx) {
+        const auto& frames = m_screen->data().frames;
+        if (idx >= 0 && idx < static_cast<int>(frames.size()))
+            emit timePointHovered(frames[idx]);
+    });
+    connect(m_screen, &OscilloscopeScreen::crosshairLeft, this, &OscilloscopeWidget::timePointLeft);
+
+    // Forward view range signal for re-simulation
+    connect(m_screen, &OscilloscopeScreen::viewRangeExceedsData, this, &OscilloscopeWidget::simulationRangeNeeded);
+
+    // Time slider: user drags to jump to a time position
+    connect(m_timeSlider, &QSlider::valueChanged, this, [this](int value) {
+        double dataEnd = m_screen->dataEndTime();
+        if (dataEnd <= 0.0) return;
+        double time = (value / 1000.0) * dataEnd;
+        m_screen->setViewCenter(time);
+    });
+
+    // Update slider position when view changes (zoom/pan)
+    connect(m_screen, &OscilloscopeScreen::viewChanged, this,
+            [this](double viewStart, double viewEnd, double dataEnd) {
+        if (dataEnd <= 0.0) return;
+        double center = (viewStart + viewEnd) / 2.0;
+        int sliderVal = static_cast<int>((center / dataEnd) * 1000.0);
+        sliderVal = std::clamp(sliderVal, 0, 1000);
+        m_timeSlider->blockSignals(true);
+        m_timeSlider->setValue(sliderVal);
+        m_timeSlider->blockSignals(false);
     });
 }
 
@@ -540,23 +886,26 @@ int OscilloscopeWidget::resolveComponentId(QComboBox* combo) const
     return data / 100; // extract componentId from encoded data
 }
 
+const TransientResult& OscilloscopeWidget::transientResult() const
+{
+    return m_screen->data();
+}
+
+void OscilloscopeWidget::setTransientResultKeepView(const TransientResult& result)
+{
+    m_screen->setDataKeepView(result);
+    if (result.success && !result.frames.empty()) {
+        int numFrames = static_cast<int>(result.frames.size());
+        m_infoLabel->setText(tr("%1 samples, %2").arg(numFrames).arg(formatTime(result.frames.back().time)));
+    }
+}
+
 void OscilloscopeWidget::setTransientResult(const TransientResult& result)
 {
     m_screen->setData(result);
     if (result.success && !result.frames.empty()) {
-        double totalTime = result.frames.back().time;
         int numFrames = static_cast<int>(result.frames.size());
-
-        // Format time nicely
-        QString timeStr;
-        if (totalTime < 0.001)
-            timeStr = QString::number(totalTime * 1e6, 'f', 0) + QString::fromUtf8("\xC2\xB5s");
-        else if (totalTime < 1.0)
-            timeStr = QString::number(totalTime * 1000, 'f', 1) + "ms";
-        else
-            timeStr = QString::number(totalTime, 'f', 3) + "s";
-
-        m_infoLabel->setText(tr("%1 samples, %2").arg(numFrames).arg(timeStr));
+        m_infoLabel->setText(tr("%1 samples, %2").arg(numFrames).arg(formatTime(result.frames.back().time)));
     }
 }
 
@@ -564,6 +913,71 @@ void OscilloscopeWidget::clearData()
 {
     m_screen->clearData();
     m_infoLabel->setText("");
+}
+
+void OscilloscopeWidget::appendFrames(const std::vector<TransientFrame>& newFrames)
+{
+    m_screen->appendFrames(newFrames);
+    updateInfoLabel();
+}
+
+void OscilloscopeWidget::setStreaming(bool streaming)
+{
+    m_screen->setStreaming(streaming);
+}
+
+void OscilloscopeWidget::setAutoScale(double frequency)
+{
+    m_screen->setAutoScale(frequency);
+}
+
+void OscilloscopeWidget::updateInfoLabel()
+{
+    const auto& frames = m_screen->data().frames;
+    if (frames.empty()) return;
+
+    int numFrames = static_cast<int>(frames.size());
+    m_infoLabel->setText(tr("%1 samples, %2").arg(numFrames).arg(formatTime(frames.back().time)));
+}
+
+QJsonObject OscilloscopeWidget::saveSettings() const
+{
+    QJsonObject obj;
+    obj["ch1Enabled"] = m_ch1EnableCheck->isChecked();
+    obj["ch2Enabled"] = m_ch2EnableCheck->isChecked();
+    obj["ch1Mode"] = m_ch1ModeCombo->currentData().toInt();
+    obj["ch2Mode"] = m_ch2ModeCombo->currentData().toInt();
+    obj["ch1Pos"] = m_ch1PosCombo->currentData().toInt();
+    obj["ch1Neg"] = m_ch1NegCombo->currentData().toInt();
+    obj["ch2Pos"] = m_ch2PosCombo->currentData().toInt();
+    obj["ch2Neg"] = m_ch2NegCombo->currentData().toInt();
+    return obj;
+}
+
+void OscilloscopeWidget::restoreSettings(const QJsonObject& obj)
+{
+    if (obj.isEmpty()) return;
+
+    m_ch1EnableCheck->setChecked(obj["ch1Enabled"].toBool(true));
+    m_ch2EnableCheck->setChecked(obj["ch2Enabled"].toBool(true));
+
+    // Restore mode combos
+    int ch1Mode = obj["ch1Mode"].toInt(static_cast<int>(ProbeMode::Voltage));
+    int ch2Mode = obj["ch2Mode"].toInt(static_cast<int>(ProbeMode::Voltage));
+    int idx1 = m_ch1ModeCombo->findData(ch1Mode);
+    if (idx1 >= 0) m_ch1ModeCombo->setCurrentIndex(idx1);
+    int idx2 = m_ch2ModeCombo->findData(ch2Mode);
+    if (idx2 >= 0) m_ch2ModeCombo->setCurrentIndex(idx2);
+
+    // Restore probe selections
+    auto restore = [](QComboBox* combo, int data) {
+        int idx = combo->findData(data);
+        if (idx >= 0) combo->setCurrentIndex(idx);
+    };
+    restore(m_ch1PosCombo, obj["ch1Pos"].toInt(-1));
+    restore(m_ch1NegCombo, obj["ch1Neg"].toInt(-1));
+    restore(m_ch2PosCombo, obj["ch2Pos"].toInt(-1));
+    restore(m_ch2NegCombo, obj["ch2Neg"].toInt(-1));
 }
 
 void OscilloscopeWidget::updateComponentList(Circuit* circuit)
@@ -625,6 +1039,22 @@ void OscilloscopeWidget::updateComponentList(Circuit* circuit)
 
     // Trigger an update with restored selections
     onProbeChanged();
+}
+
+void OscilloscopeWidget::setProbeFromScene(int componentId, int pinIndex, int channel, bool positive)
+{
+    int data = componentId * 100 + pinIndex;
+
+    QComboBox* combo = nullptr;
+    if (channel == 1)
+        combo = positive ? m_ch1PosCombo : m_ch1NegCombo;
+    else
+        combo = positive ? m_ch2PosCombo : m_ch2NegCombo;
+
+    int idx = combo->findData(data);
+    if (idx >= 0) {
+        combo->setCurrentIndex(idx); // triggers onProbeChanged via signal
+    }
 }
 
 ProbePin OscilloscopeWidget::probeSelection(int channel, bool positive) const

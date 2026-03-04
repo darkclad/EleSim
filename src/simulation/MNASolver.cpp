@@ -1,4 +1,5 @@
 #include "MNASolver.h"
+#include "SharedFrameBuffer.h"
 #include "../core/Circuit.h"
 #include "../core/Component.h"
 #include "../core/Node.h"
@@ -131,7 +132,7 @@ static MNASetup prepareMNA(Circuit& circuit)
 
 // --- DC Analysis ---
 
-SimulationResult MNASolver::solveDC(Circuit& circuit)
+SimulationResult MNASolver::solveDC(Circuit& circuit, std::atomic<bool>* cancelled)
 {
     SimulationResult result;
 
@@ -177,6 +178,10 @@ SimulationResult MNASolver::solveDC(Circuit& circuit)
 
     // Iterative DC solve: resolve diode states until stable
     for (int iter = 0; iter < 30; ++iter) {
+        if (cancelled && cancelled->load()) {
+            result.errorMessage = "Cancelled";
+            return result;
+        }
         Eigen::MatrixXd A = Eigen::MatrixXd::Zero(matSize, matSize);
         Eigen::VectorXd b = Eigen::VectorXd::Zero(matSize);
 
@@ -414,7 +419,7 @@ SimulationResult MNASolver::solveDC(Circuit& circuit)
 
 // --- AC Analysis ---
 
-SimulationResult MNASolver::solveAC(Circuit& circuit, double frequency)
+SimulationResult MNASolver::solveAC(Circuit& circuit, double frequency, std::atomic<bool>* cancelled)
 {
     SimulationResult result;
 
@@ -510,7 +515,8 @@ SimulationResult MNASolver::solveAC(Circuit& circuit, double frequency)
 
 // --- Transient Analysis ---
 
-SimulationResult MNASolver::solveTransient(Circuit& circuit, double timeStep, double totalTime)
+SimulationResult MNASolver::solveTransient(Circuit& circuit, double timeStep, double totalTime,
+                                           std::atomic<bool>* cancelled)
 {
     // For transient: use backward Euler discretization
     // Capacitor C -> equivalent conductance G_eq = C/dt, current source I_eq = C/dt * V_prev
@@ -549,6 +555,10 @@ SimulationResult MNASolver::solveTransient(Circuit& circuit, double timeStep, do
     SimulationResult result;
 
     for (int step = 0; step <= numSteps; ++step) {
+        if (cancelled && cancelled->load()) {
+            result.errorMessage = "Cancelled";
+            return result;
+        }
         double t = step * timeStep;
 
         Eigen::MatrixXd A = Eigen::MatrixXd::Zero(matSize, matSize);
@@ -875,7 +885,8 @@ SimulationResult MNASolver::solveTransient(Circuit& circuit, double timeStep, do
 
 // --- Transient Analysis (full frames for oscilloscope) ---
 
-TransientResult MNASolver::solveTransientFull(Circuit& circuit, double timeStep, double totalTime)
+TransientResult MNASolver::solveTransientFull(Circuit& circuit, double timeStep, double totalTime,
+                                              std::atomic<bool>* cancelled)
 {
     TransientResult tResult;
 
@@ -906,6 +917,10 @@ TransientResult MNASolver::solveTransientFull(Circuit& circuit, double timeStep,
     }
 
     for (int step = 0; step <= numSteps; ++step) {
+        if (cancelled && cancelled->load()) {
+            tResult.errorMessage = "Cancelled";
+            return tResult;
+        }
         double t = step * timeStep;
 
         Eigen::MatrixXd A = Eigen::MatrixXd::Zero(matSize, matSize);
@@ -1195,17 +1210,17 @@ TransientResult MNASolver::solveTransientFull(Circuit& circuit, double timeStep,
 
 // --- Mixed DC+AC Analysis (Superposition) ---
 
-SimulationResult MNASolver::solveMixed(Circuit& circuit, double acFrequency)
+SimulationResult MNASolver::solveMixed(Circuit& circuit, double acFrequency, std::atomic<bool>* cancelled)
 {
     // Step 1: Solve DC (AC sources contribute 0V in DC)
-    SimulationResult dcResult = solveDC(circuit);
+    SimulationResult dcResult = solveDC(circuit, cancelled);
     if (!dcResult.success) {
         dcResult.errorMessage = "DC part of superposition failed: " + dcResult.errorMessage;
         return dcResult;
     }
 
     // Step 2: Solve AC
-    SimulationResult acResult = solveAC(circuit, acFrequency);
+    SimulationResult acResult = solveAC(circuit, acFrequency, cancelled);
     if (!acResult.success) {
         acResult.errorMessage = "AC part of superposition failed: " + acResult.errorMessage;
         return acResult;
@@ -1242,4 +1257,417 @@ SimulationResult MNASolver::solveMixed(Circuit& circuit, double acFrequency)
     }
 
     return result;
+}
+
+// --- Extract SimulationResult from last frame of TransientResult ---
+
+SimulationResult MNASolver::resultFromLastFrame(const TransientResult& tResult, Circuit& circuit)
+{
+    SimulationResult result;
+    if (!tResult.success || tResult.frames.empty()) {
+        result.errorMessage = tResult.errorMessage;
+        return result;
+    }
+
+    const auto& frame = tResult.frames.back();
+
+    // Node voltages
+    for (auto& [nodeId, voltage] : frame.nodeVoltages) {
+        NodeResult nr;
+        nr.nodeId = nodeId;
+        nr.voltage = voltage;
+        result.nodeResults[nodeId] = nr;
+    }
+
+    // Update node objects
+    for (auto& node : circuit.nodes()) {
+        auto it = result.nodeResults.find(node->id());
+        if (it != result.nodeResults.end())
+            node->setVoltage(it->second.voltage);
+    }
+
+    // Branch results
+    for (auto& [compId, comp] : circuit.components()) {
+        if (comp->pinCount() < 2) continue;
+
+        BranchResult br;
+        br.componentId = compId;
+
+        auto vIt = frame.componentVoltages.find(compId);
+        br.voltageDrop = (vIt != frame.componentVoltages.end()) ? vIt->second : 0.0;
+
+        auto iIt = frame.branchCurrents.find(compId);
+        br.current = (iIt != frame.branchCurrents.end()) ? iIt->second : 0.0;
+
+        br.power = std::abs(br.voltageDrop * br.current);
+        result.branchResults[compId] = br;
+    }
+
+    result.success = true;
+    return result;
+}
+
+// --- Streaming Transient with Continuation ---
+
+void MNASolver::solveTransientStreaming(
+    Circuit& circuit, double timeStep, double totalTime,
+    const TransientState& initialState,
+    SharedFrameBuffer& buffer,
+    std::atomic<bool>* cancelled)
+{
+    auto setup = prepareMNA(circuit);
+    if (!setup.ok) {
+        buffer.markComplete(false, setup.error, TransientState());
+        return;
+    }
+
+    int numNodes = setup.numNodes;
+    int matSize = setup.matSize;
+    int numSteps = static_cast<int>(totalTime / timeStep);
+
+    // Determine starting state: resume or fresh
+    int startStep;
+    Eigen::VectorXd xPrev;
+    std::map<int, double> inductorCurrents;
+    std::map<int, double> capacitorCurrents;
+
+    if (initialState.isValid()
+        && initialState.numNodes == numNodes
+        && initialState.matSize == matSize
+        && std::abs(initialState.timeStep - timeStep) < 1e-15) {
+        // Resume from saved state
+        startStep = initialState.completedSteps + 1;
+        xPrev = initialState.xPrev;
+        inductorCurrents = initialState.inductorCurrents;
+        capacitorCurrents = initialState.capacitorCurrents;
+    } else {
+        // Fresh start
+        startStep = 0;
+        xPrev = Eigen::VectorXd::Zero(matSize);
+        for (auto& [id, comp] : circuit.components()) {
+            if (comp->type() == ComponentType::Inductor)
+                inductorCurrents[id] = 0.0;
+            if (comp->type() == ComponentType::Capacitor)
+                capacitorCurrents[id] = 0.0;
+        }
+    }
+
+    constexpr int BATCH_SIZE = 64;
+    std::vector<TransientFrame> localBatch;
+    localBatch.reserve(BATCH_SIZE);
+
+    auto saveState = [&](int lastStep) {
+        TransientState state;
+        state.completedSteps = lastStep;
+        state.currentTime = lastStep * timeStep;
+        state.xPrev = xPrev;
+        state.inductorCurrents = inductorCurrents;
+        state.capacitorCurrents = capacitorCurrents;
+        state.numNodes = numNodes;
+        state.matSize = matSize;
+        state.timeStep = timeStep;
+        return state;
+    };
+
+    for (int step = startStep; step <= numSteps; ++step) {
+        if (cancelled && cancelled->load()) {
+            if (!localBatch.empty())
+                buffer.appendFrames(std::move(localBatch));
+            buffer.markComplete(false, "Cancelled", saveState(step > 0 ? step - 1 : 0));
+            return;
+        }
+
+        double t = step * timeStep;
+
+        Eigen::MatrixXd A = Eigen::MatrixXd::Zero(matSize, matSize);
+        Eigen::VectorXd bVec = Eigen::VectorXd::Zero(matSize);
+
+        for (auto& [id, comp] : circuit.components()) {
+            if (!canStamp(comp.get())) continue;
+
+            if (comp->type() == ComponentType::Capacitor) {
+                int n1 = comp->pin(0).nodeId - 1;
+                int n2 = comp->pin(1).nodeId - 1;
+                double geq = comp->value() / timeStep;
+
+                if (n1 >= 0) A(n1, n1) += geq;
+                if (n2 >= 0) A(n2, n2) += geq;
+                if (n1 >= 0 && n2 >= 0) { A(n1, n2) -= geq; A(n2, n1) -= geq; }
+
+                double vP1 = (n1 >= 0) ? xPrev(n1) : 0.0;
+                double vP2 = (n2 >= 0) ? xPrev(n2) : 0.0;
+                double ieq = geq * (vP1 - vP2);
+                if (n1 >= 0) bVec(n1) += ieq;
+                if (n2 >= 0) bVec(n2) -= ieq;
+
+            } else if (comp->type() == ComponentType::Inductor) {
+                int n1 = comp->pin(0).nodeId - 1;
+                int n2 = comp->pin(1).nodeId - 1;
+                double geq = timeStep / comp->value();
+
+                if (n1 >= 0) A(n1, n1) += geq;
+                if (n2 >= 0) A(n2, n2) += geq;
+                if (n1 >= 0 && n2 >= 0) { A(n1, n2) -= geq; A(n2, n1) -= geq; }
+
+                double iPrev = inductorCurrents[id];
+                if (n1 >= 0) bVec(n1) -= iPrev;
+                if (n2 >= 0) bVec(n2) += iPrev;
+
+            } else if (comp->type() == ComponentType::ACSource) {
+                auto* ac = static_cast<ACSource*>(comp.get());
+                double v = ac->value() * std::sin(2.0 * M_PI * ac->frequency() * t
+                                                    + ac->phase() * M_PI / 180.0);
+                int n_pos = comp->pin(0).nodeId - 1;
+                int n_neg = comp->pin(1).nodeId - 1;
+                int bi = comp->branchIndex();
+                if (bi < 0) continue;
+
+                if (n_pos >= 0) { A(n_pos, bi) += 1.0; A(bi, n_pos) += 1.0; }
+                if (n_neg >= 0) { A(n_neg, bi) -= 1.0; A(bi, n_neg) -= 1.0; }
+                bVec(bi) = v;
+
+            } else if (comp->type() == ComponentType::PulseSource) {
+                auto* sq = static_cast<PulseSource*>(comp.get());
+                double period = 1.0 / sq->frequency();
+                double phaseOffset = sq->phase() / 360.0 * period;
+                double tMod = std::fmod(t + phaseOffset, period);
+                if (tMod < 0) tMod += period;
+                double v = (tMod < period * sq->dutyCycle()) ? sq->value() : -sq->value();
+
+                int n_pos = comp->pin(0).nodeId - 1;
+                int n_neg = comp->pin(1).nodeId - 1;
+                int bi = comp->branchIndex();
+                if (bi < 0) continue;
+
+                if (n_pos >= 0) { A(n_pos, bi) += 1.0; A(bi, n_pos) += 1.0; }
+                if (n_neg >= 0) { A(n_neg, bi) -= 1.0; A(bi, n_neg) -= 1.0; }
+                bVec(bi) = v;
+
+            } else if (comp->type() == ComponentType::Diode) {
+                auto* diode = static_cast<Diode*>(comp.get());
+                int n1 = comp->pin(0).nodeId - 1;
+                int n2 = comp->pin(1).nodeId - 1;
+                double vPrev1 = (n1 >= 0) ? xPrev(n1) : 0.0;
+                double vPrev2 = (n2 >= 0) ? xPrev(n2) : 0.0;
+                bool forward = (vPrev1 - vPrev2) > comp->value();
+                diode->stampWithState(A, bVec, forward);
+
+            } else if (comp->type() == ComponentType::ZenerDiode) {
+                auto* zd = static_cast<ZenerDiode*>(comp.get());
+                int n1 = comp->pin(0).nodeId - 1;
+                int n2 = comp->pin(1).nodeId - 1;
+                double vPrev1 = (n1 >= 0) ? xPrev(n1) : 0.0;
+                double vPrev2 = (n2 >= 0) ? xPrev(n2) : 0.0;
+                double vd = vPrev1 - vPrev2;
+                ZenerDiode::State state;
+                if (vd > zd->forwardVoltage())
+                    state = ZenerDiode::Forward;
+                else if (vd < -zd->zenerVoltage())
+                    state = ZenerDiode::Breakdown;
+                else
+                    state = ZenerDiode::Blocking;
+                zd->stampWithState(A, bVec, state);
+
+            } else if (comp->type() == ComponentType::NMosfet) {
+                auto* m = static_cast<NMosfet*>(comp.get());
+                int nG = comp->pin(0).nodeId - 1;
+                int nS = comp->pin(2).nodeId - 1;
+                double vG = (nG >= 0) ? xPrev(nG) : 0.0;
+                double vS = (nS >= 0) ? xPrev(nS) : 0.0;
+                bool on = (vG - vS) >= comp->value();
+                m->stampWithState(A, bVec, on ? NMosfet::On : NMosfet::Cutoff);
+
+            } else if (comp->type() == ComponentType::PMosfet) {
+                auto* m = static_cast<PMosfet*>(comp.get());
+                int nG = comp->pin(0).nodeId - 1;
+                int nS = comp->pin(1).nodeId - 1;
+                double vG = (nG >= 0) ? xPrev(nG) : 0.0;
+                double vS = (nS >= 0) ? xPrev(nS) : 0.0;
+                bool on = (vS - vG) >= comp->value();
+                m->stampWithState(A, bVec, on ? PMosfet::On : PMosfet::Cutoff);
+
+            } else if (comp->type() == ComponentType::NOTGate) {
+                auto* g = static_cast<NOTGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nGND = comp->pin(3).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate(comp.get(), vA, vGND);
+                g->stampWithState(A, bVec, outHigh ? NOTGate::OutputHigh : NOTGate::OutputLow);
+
+            } else if (comp->type() == ComponentType::ANDGate) {
+                auto* g = static_cast<ANDGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nB   = comp->pin(1).nodeId - 1;
+                int nGND = comp->pin(4).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vB   = (nB >= 0) ? xPrev(nB) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate2(comp.get(), vA, vB, vGND);
+                g->stampWithState(A, bVec, outHigh ? ANDGate::OutputHigh : ANDGate::OutputLow);
+
+            } else if (comp->type() == ComponentType::ORGate) {
+                auto* g = static_cast<ORGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nB   = comp->pin(1).nodeId - 1;
+                int nGND = comp->pin(4).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vB   = (nB >= 0) ? xPrev(nB) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate2(comp.get(), vA, vB, vGND);
+                g->stampWithState(A, bVec, outHigh ? ORGate::OutputHigh : ORGate::OutputLow);
+
+            } else if (comp->type() == ComponentType::XORGate) {
+                auto* g = static_cast<XORGate*>(comp.get());
+                int nA   = comp->pin(0).nodeId - 1;
+                int nB   = comp->pin(1).nodeId - 1;
+                int nGND = comp->pin(4).nodeId - 1;
+                double vA   = (nA >= 0) ? xPrev(nA) : 0.0;
+                double vB   = (nB >= 0) ? xPrev(nB) : 0.0;
+                double vGND = (nGND >= 0) ? xPrev(nGND) : 0.0;
+                bool outHigh = evaluateGate2(comp.get(), vA, vB, vGND);
+                g->stampWithState(A, bVec, outHigh ? XORGate::OutputHigh : XORGate::OutputLow);
+
+            } else {
+                comp->stampDC(A, bVec, matSize);
+            }
+        }
+
+        Eigen::PartialPivLU<Eigen::MatrixXd> solver(A);
+        double det = solver.determinant();
+        if (std::abs(det) < 1e-15) {
+            if (!localBatch.empty())
+                buffer.appendFrames(std::move(localBatch));
+            buffer.markComplete(false,
+                "Singular matrix at t=" + QString::number(t, 'f', 4) + "s",
+                saveState(step > 0 ? step - 1 : 0));
+            return;
+        }
+
+        Eigen::VectorXd x = solver.solve(bVec);
+
+        // Update inductor currents
+        for (auto& [id, comp] : circuit.components()) {
+            if (comp->type() != ComponentType::Inductor) continue;
+            if (!canStamp(comp.get())) continue;
+            int n1 = comp->pin(0).nodeId - 1;
+            int n2 = comp->pin(1).nodeId - 1;
+            double v1 = (n1 >= 0) ? x(n1) : 0.0;
+            double v2 = (n2 >= 0) ? x(n2) : 0.0;
+            double vL = v1 - v2;
+            inductorCurrents[id] += (timeStep / comp->value()) * vL;
+        }
+
+        // Update capacitor currents
+        for (auto& [id, comp] : circuit.components()) {
+            if (comp->type() != ComponentType::Capacitor) continue;
+            if (!canStamp(comp.get())) continue;
+            int n1 = comp->pin(0).nodeId - 1;
+            int n2 = comp->pin(1).nodeId - 1;
+            double v1 = (n1 >= 0) ? x(n1) : 0.0;
+            double v2 = (n2 >= 0) ? x(n2) : 0.0;
+            double v1p = (n1 >= 0) ? xPrev(n1) : 0.0;
+            double v2p = (n2 >= 0) ? xPrev(n2) : 0.0;
+            capacitorCurrents[id] = comp->value() / timeStep * ((v1 - v2) - (v1p - v2p));
+        }
+
+        // Record frame
+        TransientFrame frame;
+        frame.time = t;
+        frame.nodeVoltages[0] = 0.0;
+        for (int i = 0; i < numNodes; ++i) {
+            frame.nodeVoltages[i + 1] = x(i);
+        }
+
+        int vsIdx = 0;
+        for (auto& [id, comp] : circuit.components()) {
+            if (comp->pinCount() < 2) continue;
+
+            int p1, p2;
+            getActivePins(comp.get(), p1, p2);
+            int n1 = comp->pin(p1).nodeId;
+            int n2 = comp->pin(p2).nodeId;
+            double v1 = (n1 > 0 && n1 <= numNodes) ? x(n1 - 1) : 0.0;
+            double v2 = (n2 > 0 && n2 <= numNodes) ? x(n2 - 1) : 0.0;
+            double vDrop = v1 - v2;
+
+            double current = 0.0;
+            if (comp->isVoltageSource()) {
+                current = x(numNodes + vsIdx);
+                ++vsIdx;
+            } else if (comp->type() == ComponentType::Inductor) {
+                current = inductorCurrents[id];
+            } else if (comp->type() == ComponentType::Capacitor) {
+                current = capacitorCurrents[id];
+            } else if (comp->type() == ComponentType::Diode) {
+                if (vDrop > comp->value())
+                    current = (vDrop - comp->value()) / Diode::R_on;
+                else if (vDrop > 0)
+                    current = 0.0;
+                else
+                    current = vDrop / Diode::R_off;
+            } else if (comp->type() == ComponentType::ZenerDiode) {
+                auto* zd = static_cast<ZenerDiode*>(comp.get());
+                if (vDrop > zd->forwardVoltage())
+                    current = (vDrop - zd->forwardVoltage()) / ZenerDiode::R_on;
+                else if (vDrop < -zd->zenerVoltage())
+                    current = (vDrop + zd->zenerVoltage()) / ZenerDiode::R_on;
+                else
+                    current = vDrop / ZenerDiode::R_off;
+            } else if (comp->type() == ComponentType::NMosfet) {
+                int nG2 = comp->pin(0).nodeId;
+                int nS2 = comp->pin(2).nodeId;
+                int nD2 = comp->pin(1).nodeId;
+                double vG2 = (nG2 > 0 && nG2 <= numNodes) ? x(nG2 - 1) : 0.0;
+                double vS2 = (nS2 > 0 && nS2 <= numNodes) ? x(nS2 - 1) : 0.0;
+                double vD2 = (nD2 > 0 && nD2 <= numNodes) ? x(nD2 - 1) : 0.0;
+                double vds2 = vD2 - vS2;
+                vDrop = vds2;
+                double R = ((vG2 - vS2) >= comp->value()) ? NMosfet::R_on : NMosfet::R_off;
+                current = vds2 / R;
+            } else if (comp->type() == ComponentType::PMosfet) {
+                int nG2 = comp->pin(0).nodeId;
+                int nS2 = comp->pin(1).nodeId;
+                int nD2 = comp->pin(2).nodeId;
+                double vG2 = (nG2 > 0 && nG2 <= numNodes) ? x(nG2 - 1) : 0.0;
+                double vS2 = (nS2 > 0 && nS2 <= numNodes) ? x(nS2 - 1) : 0.0;
+                double vD2 = (nD2 > 0 && nD2 <= numNodes) ? x(nD2 - 1) : 0.0;
+                double vsd2 = vS2 - vD2;
+                vDrop = vsd2;
+                double R = ((vS2 - vG2) >= comp->value()) ? PMosfet::R_on : PMosfet::R_off;
+                current = vsd2 / R;
+            } else if (isLogicGate(comp->type())) {
+                int vddPin = (comp->type() == ComponentType::NOTGate) ? 2 : 3;
+                int gndPin = (comp->type() == ComponentType::NOTGate) ? 3 : 4;
+                int nVDD2 = comp->pin(vddPin).nodeId;
+                int nGND2 = comp->pin(gndPin).nodeId;
+                double vVDD2 = (nVDD2 > 0 && nVDD2 <= numNodes) ? x(nVDD2 - 1) : 0.0;
+                double vGND2 = (nGND2 > 0 && nGND2 <= numNodes) ? x(nGND2 - 1) : 0.0;
+                vDrop = vVDD2 - vGND2;
+                current = (vVDD2 - vGND2) / (NOTGate::R_on + NOTGate::R_off);
+            } else if (comp->type() == ComponentType::DCCurrentSource) {
+                current = comp->value();
+            } else if (comp->value() > 0.0) {
+                current = vDrop / comp->value();
+            }
+            frame.branchCurrents[id] = current;
+            frame.componentVoltages[id] = vDrop;
+        }
+
+        localBatch.push_back(std::move(frame));
+        xPrev = x;
+
+        // Flush batch when full
+        if (static_cast<int>(localBatch.size()) >= BATCH_SIZE) {
+            buffer.appendFrames(std::move(localBatch));
+            localBatch.clear();
+            localBatch.reserve(BATCH_SIZE);
+        }
+    }
+
+    // Flush remaining frames
+    if (!localBatch.empty())
+        buffer.appendFrames(std::move(localBatch));
+
+    buffer.markComplete(true, QString(), saveState(numSteps));
 }

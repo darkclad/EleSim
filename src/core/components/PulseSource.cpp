@@ -6,7 +6,7 @@
 #endif
 
 PulseSource::PulseSource(double amplitude, double frequency, double phase, double dutyCycle)
-    : Component(ComponentType::PulseSource, 2, amplitude)
+    : Source(ComponentType::PulseSource, 2, amplitude)
     , m_frequency(frequency)
     , m_phase(phase)
     , m_dutyCycle(qBound(0.01, dutyCycle, 0.99))

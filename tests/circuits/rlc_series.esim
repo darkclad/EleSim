@@ -8,8 +8,8 @@
             "value": 5.0,
             "frequency": 1000.0,
             "phase": 0.0,
-            "x": 50.0,
-            "y": 130.0,
+            "x": 100.0,
+            "y": 200.0,
             "rotation": 0.0
         },
         {
@@ -17,8 +17,8 @@
             "type": "Resistor",
             "name": "R1",
             "value": 100.0,
-            "x": 150.0,
-            "y": 100.0,
+            "x": 230.0,
+            "y": 170.0,
             "rotation": 0.0
         },
         {
@@ -26,8 +26,8 @@
             "type": "Inductor",
             "name": "L1",
             "value": 0.01,
-            "x": 250.0,
-            "y": 100.0,
+            "x": 330.0,
+            "y": 170.0,
             "rotation": 0.0
         },
         {
@@ -35,17 +35,17 @@
             "type": "Capacitor",
             "name": "C1",
             "value": 1e-7,
-            "x": 350.0,
-            "y": 130.0,
-            "rotation": 270.0
+            "x": 430.0,
+            "y": 200.0,
+            "rotation": 90.0
         },
         {
             "id": 5,
             "type": "Ground",
             "name": "GND1",
             "value": 0.0,
-            "x": 200.0,
-            "y": 160.0,
+            "x": 250.0,
+            "y": 290.0,
             "rotation": 0.0
         }
     ],
@@ -53,7 +53,13 @@
         { "comp1": 1, "pin1": 0, "comp2": 2, "pin2": 0 },
         { "comp1": 2, "pin1": 1, "comp2": 3, "pin2": 0 },
         { "comp1": 3, "pin1": 1, "comp2": 4, "pin2": 0 },
-        { "comp1": 4, "pin1": 1, "comp2": 1, "pin2": 1 },
-        { "comp1": 1, "pin1": 1, "comp2": 5, "pin2": 0 }
+        {
+            "comp1": 4, "pin1": 1, "comp2": 1, "pin2": 1,
+            "waypoints": [{"x": 430, "y": 290}, {"x": 100, "y": 290}]
+        },
+        {
+            "comp1": 1, "pin1": 1, "comp2": 5, "pin2": 0,
+            "waypoints": [{"x": 100, "y": 290}]
+        }
     ]
 }
